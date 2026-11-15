@@ -185,3 +185,28 @@ With real scrolling (61 % zoom, page 1 to 6 in 3.8 s), per-thread CPU showed the
 |---|---|---|---|---|---|
 | SumatraPDF 3.6.1 | 32 MB | 16 MB | 0.0 % | 6.3 % | 0.0 % |
 | Kitab 0.6.0 (three runs) | 90–93 MB (81–94 after scrolling) | 102–105 MB (116–117 after scrolling, 121–123 at the peak) | 0.2–0.5 % | 7.6–8.3 % | 0.1–0.7 % |
+
+
+## Speed and memory round after 0.6.0 (15 November 2026)
+
+Fifteen candidates from a code read; each was measured against the build before it and kept only if its number improved (Windows 11, release build, 1200×800 window, fresh profile per run, 160–164 Hz screens). UI thread = CPU time of the main thread over the scenario.
+
+| Change | Scenario | Before | After | Kept |
+|---|---|---|---|---|
+| PDF page sizes from the page tree (no page loads at open) | Open a 1,251-page textbook, 3 runs | open 51–56 ms, 285 MB private | open 18–21 ms, 257 MB | yes (`81cf2d6`) |
+| Link tooltips and footnote checks worked out once per page | Pointer sweep over a 255-link contents page, 3 s, 5 runs | UI median 469 ms | 328 ms | yes |
+| Deep-zoom tiles keep only their GPU copy | 640 % zoom and a short scroll, 3 runs | ~241 MB private, ~158 MB working set | ~222 MB, ~138 MB | yes |
+| Home covers keep only their GPU copy | 3,000-book All shelf, 40 notches, 3 runs | 97–98 MB private | 92 MB | yes |
+| Find highlights painted by one element per page | Scroll with Find "e" (8,245 hits), 5 runs | UI median 578 ms | 469 ms (406 with Find closed) | yes (`b151a56`) |
+| Pen strokes tessellated once (gpui `Path::kitab_offset`) | 60 strokes on a page, scroll wiggle, 9 runs | UI median 344 ms | 297 ms | yes (`8032b2b`) |
+| Shared themes in Style | Clone timing | 336 ns per clone | 65 ns (≈3 µs per frame) | no: too small to see |
+| Contents cache keyed by a counter, not an outline hash | Hash timing | 0.5 µs (30 headings) to 55 µs (3,000) per frame | — | no: 5 of 2,172 real books exceed 500 headings |
+| Linear unsaved-edit count | 50–1,000 edits | 1.4–29 µs | 1.7–24 µs | no |
+| Window chrome as cached views | Scroll with each part off (sidebar closed), 3 runs | all on 359 ms | status bar off 375, dock tucked 328, title bar off 375 | not built: no part stands out of the noise (Focus mode, all off at once: 383 → 266 ms) |
+| Thumbnails in their own cache | Scroll 25 pages and back, count page redraws | 5 with Contents | 5 with Pages | not built: thumbnails don't evict pages |
+| Open the file before GPUI starts | Start-up trace | engine open 1.3 ms (small PDF), 19 ms (1,251 pages) | — | not built: at most 19 ms, only on double-click |
+
+Measured, nothing to fix:
+- **CPU before `main`:** 0 or 15.6 ms, one tick of Windows' 15.6 ms process clock. The 30–47 ms seen once came from fresh builds' first launches.
+- **Page uploads at 160 Hz:** no frame over 6.25 ms while scrolling, at 61 % (722×1022 pages, slowest frame 5.1 ms) or 200 % (1786×2526, slowest 4.8 ms).
+- **Small images pinning page textures:** the atlas does pack small images into page textures' spare room (`directx_atlas.rs` `allocate`), but scrolling 40 pages with the Pages pane open holds 12 MB more GPU memory than without, about 9 MB of it the thumbnails themselves.
