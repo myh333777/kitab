@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-15
+
 ### Changed
 - Long PDFs open faster and use less memory: page sizes are read from the page list instead of loading every page (a 1,251-page textbook: 54 → 19 ms to open, 29 MB less).
 - Pages full of links (contents pages, indexes) cost less to draw: each link is worked out once, not on every frame (about 30 % less work while the pointer moves over a contents page with 255 links).
@@ -388,7 +390,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fit width and fit page follow a window resize even when no new page has to be drawn.
 - The Settings window shrinks to fit small windows instead of running off the left edge.
 
-[Unreleased]: https://github.com/t21dev/kitab/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/t21dev/kitab/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/t21dev/kitab/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/t21dev/kitab/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/t21dev/kitab/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/t21dev/kitab/compare/v0.4.1...v0.4.2
