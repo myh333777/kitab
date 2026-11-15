@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Long PDFs open faster and use less memory: page sizes are read from the page list instead of loading every page (a 1,251-page textbook: 54 → 19 ms to open, 29 MB less).
 - Pages full of links (contents pages, indexes) cost less to draw: each link is worked out once, not on every frame (about 30 % less work while the pointer moves over a contents page with 255 links).
+- Scrolling with Find open costs less: a page's highlights are painted together instead of each as its own element (searching a common letter, 8,245 matches: about 19 % less work while scrolling).
 - Deep zoom and Home's covers keep their pictures only on the graphics card once drawn, as pages already did (about 20 MB less at deep zoom, 6 MB less on a big Home shelf).
 
 ## [0.6.0] - 2026-11-15

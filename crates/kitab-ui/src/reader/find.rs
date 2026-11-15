@@ -411,7 +411,10 @@ impl Reader {
             return Vec::new();
         };
         let size = self.raw_page_size(ix);
-        let mut out = Vec::new();
+        // Every highlight on the page painted by one element: a common word
+        // lights up hundreds of places, and an element each made every frame
+        // lay all of them out (scrolling cost about 40 % more).
+        let mut rects = Vec::new();
         for (h, quads) in hits.iter().enumerate() {
             let current = self.find.current == Some((ix as u32, h));
             // Drawn over the page image, so always see-through: a theme's
@@ -425,20 +428,31 @@ impl Reader {
             for q in quads {
                 let r = rect_to_view(*q, size, self.rotation, ppt);
                 // A little air around the glyphs, as a marker would leave.
-                out.push(
-                    div()
-                        .absolute()
-                        .left(px(r.x - 1.0))
-                        .top(px(r.y - 1.0))
-                        .w(px(r.w + 2.0))
-                        .h(px(r.h + 2.0))
-                        .rounded(px(2.0))
-                        .bg(color)
-                        .into_any_element(),
-                );
+                rects.push((r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0, color));
             }
         }
-        out
+        if rects.is_empty() {
+            return Vec::new();
+        }
+        vec![
+            gpui::canvas(
+                |_, _, _| (),
+                move |bounds, _, window, _| {
+                    for (x, y, w, h, color) in rects {
+                        let at = gpui::Bounds::new(
+                            bounds.origin + gpui::point(px(x), px(y)),
+                            gpui::size(px(w), px(h)),
+                        );
+                        window.paint_quad(gpui::fill(at, color).corner_radii(px(2.0)));
+                    }
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .into_any_element(),
+        ]
     }
 
     /// The bar under the header, right-aligned over the pages.
