@@ -144,7 +144,7 @@ flowchart LR
 
 ### Measured
 
-Against SumatraPDF 3.6.1 on the same Windows 11 machine (Ryzen 9 9900X, RTX 5070): the 40-page `01-text-outline.pdf` in a 1200×800 window, timed from outside the app by [`kitab-bench`](crates/kitab-bench) and `tools/bench_reading.py`. The full runs are in [docs/perf/baseline.md](docs/perf/baseline.md).
+Against SumatraPDF 3.6.1 on the same Windows 11 machine (Ryzen 9 9900X, RTX 5070), re-run for 0.6.0 on 15 November 2026: the 40-page `01-text-outline.pdf` in a 1200×800 window, timed from outside the app by [`kitab-bench`](crates/kitab-bench) and `tools/bench_reading.py`, each app in a fresh profile. The full runs are in [docs/perf/baseline.md](docs/perf/baseline.md).
 
 ```mermaid
 xychart-beta
@@ -154,16 +154,16 @@ xychart-beta
     bar [2.2, 0.0, 0.0]
 ```
 
-| | Kitab | SumatraPDF 3.6.1 |
+| | Kitab 0.6.0 | SumatraPDF 3.6.1 |
 |---|---|---|
-| Window on screen | 199 ms, with the page already in it | 90 ms, blank at first |
-| Page fully drawn | 199–225 ms | 90–312 ms |
-| CPU used to reach the page | 203 ms | 203 ms |
+| Window on screen | 241 ms, with the page already in it | 68 ms, blank at first |
+| Page first seen | 268 ms | by 359 ms |
+| CPU used to reach the page | 234 ms | 187 ms |
 | CPU while idle | 0 % | 0 % |
-| CPU while scrolling | 2–7 % | 2 % |
-| Private memory, one document | 129 MB (156 MB after scrolling) | 15 MB |
+| CPU while scrolling | about 11 % of one core | 1.3 % |
+| Private memory, one document | 100 MB (114 MB after scrolling) | 15 MB |
 
-SumatraPDF is lighter on memory because it draws with GDI. About 88 MB of Kitab's share is the GPU device, the graphics driver and DirectWrite, paid once whatever you open.
+SumatraPDF starts sooner and is lighter: it draws with GDI, while Kitab first sets up the GPU (about 150 ms before its window exists), and about 88 MB of its memory is the GPU device, the graphics driver and DirectWrite, paid once whatever you open. Scrolling costing more than SumatraPDF is being looked into.
 
 ## What it opens
 

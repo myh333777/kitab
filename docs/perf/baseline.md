@@ -142,3 +142,32 @@ Same machine. `kitab-bench s2 --runs 15 --warmup 2`, medians. Kitab: release bui
 - **Page cache floor 96 → 32 MB:** the cache still always holds the pages on screen and the next three (the flicker fix); only how many pages further away it keeps went down. −18 MB private after scrolling.
 - **MuPDF store trimmed to 48 MB after each render** (its default limit is 256 MB). It made no difference on these files; it bounds image-heavy documents.
 - **What's left:** with nothing open Kitab holds about 88 MB private and 60 MB working set: GPUI's Direct3D 11 device, the NVIDIA user-mode driver and DirectWrite. SumatraPDF draws with GDI and has no such floor. A document adds about 44 MB, mostly rendered pages (each kept both as pixels in RAM and as a GPU texture).
+
+
+## 0.6.0 (main) against SumatraPDF, re-run (15 November 2026)
+
+Same machine (NVIDIA driver 621.24). Kitab: `main` at 3e99a61, built like a release (`tools/build_release.py`, static C runtime), each app in its own temporary profile. SumatraPDF 3.6.1.
+
+### Start-up: `kitab-bench s2 --runs 15 --warmup 2`, medians
+
+| File | App | Window on screen | Page first seen | CPU to page | Working set | Private | CPU in the 2 s after |
+|---|---|---|---|---|---|---|---|
+| 01-text-outline.pdf | Kitab | 241 ms (with the page) | 268 ms | 234 ms | 98.0 MB | 109.4 MB | 2.4 % |
+| | SumatraPDF 3.6.1 | 68 ms (blank) | ≤ 359 ms | 187 ms | 44.1 MB | 15.0 MB | 0.0 % |
+| 06-large-20mb.pdf | Kitab | 247 ms (with the page) | 279 ms | 265 ms | 98.6 MB | 110.4 MB | 4.7 % |
+| | SumatraPDF 3.6.1 | 68 ms (blank) | ≤ 374 ms | 171 ms | 74.2 MB | 37.2 MB | 0.0 % |
+
+- **Start-up is about 40 ms later than on 8 November, under every version, not only this one.** The released 0.5.0 (taken from its Store package) measured 232–233 ms to the window in two runs today, and `main` 239 ms, in fresh profiles: the same within noise. The start-up trace (`KITAB_TRACE_START=1`) puts the difference before any Kitab code: GPUI's `Application::new` (Direct3D device, DirectWrite) took 155–158 ms today against 110–118 ms in November's traces, and the process starts with 30–47 ms of CPU already used before `main` (0 then). Kitab's own part, from GPUI up to the window, is about 70 ms, with larger pages drawn than in November's runs.
+- **Memory is lower:** 109 MB private at open, against 145 MB on 8 November.
+
+### Reading: `python tools/bench_reading.py`, 01-text-outline.pdf, 1200×800
+
+| | Working set | Private | CPU idle (10 s) | CPU scrolling | CPU settled |
+|---|---|---|---|---|---|
+| SumatraPDF 3.6.1 | 32 MB | 15 MB | 0.0 % | 1.3 % | 0.0 % |
+| Kitab 0.6.0 (three runs) | 89 MB (84–92 after scrolling) | 100 MB (114 after scrolling, 119–123 at the peak) | 0.0–0.8 % | 9.6–13.1 % | 0.0–0.3 % |
+| Kitab, 8 November | 109 MB (114 after scrolling) | 129 MB (156 after scrolling) | 0.0–0.5 % | 2.4–7 % | 0.2 % |
+
+- Memory is 20–40 MB lower than in November, before and after scrolling.
+- **Scrolling costs more CPU than in November** (about 11 % of one core against 2.4–7 %). It isn't the frame-scheduling fix (740eb59): with its "ask again at frame end" part taken out, two runs measured 11.1 % and 11.8 %. Not yet traced to a cause; a profile of a scroll is the next step.
+- Idle stays at 0 %: frames on demand still hold.
