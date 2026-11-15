@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-15
+
 ### Added
 - Read aloud has a panel: the dock's speaker opens play and pause, a sentence back or on, stop, speed, tone and voice. A new speed, tone or voice is heard at once while reading. "Follow the voice" can be turned off, so scrolling elsewhere isn't pulled back.
 - Markdown files read aloud, block by block; the block being read is shaded. Code and diagrams are skipped.
@@ -379,7 +381,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fit width and fit page follow a window resize even when no new page has to be drawn.
 - The Settings window shrinks to fit small windows instead of running off the left edge.
 
-[Unreleased]: https://github.com/t21dev/kitab/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/t21dev/kitab/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/t21dev/kitab/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/t21dev/kitab/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/t21dev/kitab/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/t21dev/kitab/compare/v0.4.0...v0.4.1
