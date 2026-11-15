@@ -29,8 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Very deep zoom draws only what's in view, sharp, in tiles: pages past about 40 megapixels showed soft or blank before.
 - Restoring many tabs opens the one you were reading first and the others after it.
 - Code and math use the system's own fonts on macOS and Linux.
+- Scrolling with the sidebar open costs much less: the contents list is kept from frame to frame instead of being built again on every one (a fast screen draws up to 160 frames a second while the page glides).
 
 ### Fixed
+- The mouse wheel could zoom instead of scrolling, on Windows, after Ctrl was let go while another window had the keyboard: Kitab still thought Ctrl was held. The wheel's own message now says whether Ctrl and Shift are down.
 - Home with a big library: going back to a shelf, or to Home, shows its books at once instead of an empty page while the whole shelf reloads; files are checked after the shelf shows, a drive that isn't plugged in is noticed once instead of file by file, and a slow load that finishes after you've picked another shelf no longer shows its books there.
 - Dialogs (Settings and others) no longer stop half faded in, or open late, until the mouse moves: a repaint asked for while a slow frame was drawing was lost.
 - Tabs no longer vanish when Kitab is started by opening a file (common right after a reinstall): the file joins the tabs you had.

@@ -160,10 +160,10 @@ xychart-beta
 | Page first seen | 268 ms | by 359 ms |
 | CPU used to reach the page | 234 ms | 187 ms |
 | CPU while idle | 0 % | 0 % |
-| CPU while scrolling | about 11 % of one core | 1.3 % |
-| Private memory, one document | 100 MB (114 MB after scrolling) | 15 MB |
+| CPU while scrolling | about 8 % of one core | about 6 % |
+| Private memory, one document | 103 MB (117 MB after scrolling) | 16 MB |
 
-SumatraPDF starts sooner and is lighter: it draws with GDI, while Kitab first sets up the GPU (about 150 ms before its window exists), and about 88 MB of its memory is the GPU device, the graphics driver and DirectWrite, paid once whatever you open. Scrolling costing more than SumatraPDF is being looked into.
+SumatraPDF starts sooner and is lighter: it draws with GDI, while Kitab first sets up the GPU (about 150 ms before its window exists), and about 88 MB of its memory is the GPU device, the graphics driver and DirectWrite, paid once whatever you open.
 
 ## What it opens
 

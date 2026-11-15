@@ -169,5 +169,19 @@ Same machine (NVIDIA driver 621.24). Kitab: `main` at 3e99a61, built like a rele
 | Kitab, 8 November | 109 MB (114 after scrolling) | 129 MB (156 after scrolling) | 0.0–0.5 % | 2.4–7 % | 0.2 % |
 
 - Memory is 20–40 MB lower than in November, before and after scrolling.
-- **Scrolling costs more CPU than in November** (about 11 % of one core against 2.4–7 %). It isn't the frame-scheduling fix (740eb59): with its "ask again at frame end" part taken out, two runs measured 11.1 % and 11.8 %. Not yet traced to a cause; a profile of a scroll is the next step.
 - Idle stays at 0 %: frames on demand still hold.
+
+### Scrolling, traced and fixed (same day)
+
+The scrolling numbers above weren't scrolling. The benchmark posts wheel messages to a window that has never had the keyboard, and GPUI took Ctrl from the window thread's key state (`GetKeyState`), which reported Ctrl held for the first 11 of 60 notches: they zoomed the page out to 10 %, and the rest scrolled 40 tiny pages that barely moved. The same can happen to a person: let go of Ctrl while another window has the keyboard, then wheel over Kitab (Windows wheels the window under the pointer). Fixed in gpui patch 14: Ctrl and Shift come from the wheel message's own flags (`MK_CONTROL`, `MK_SHIFT`). SumatraPDF reads the key state too, so its earlier 1.3 % was likely the same zoom.
+
+With real scrolling (61 % zoom, page 1 to 6 in 3.8 s), per-thread CPU showed the UI thread doing nearly all of it: about 660 ms of the 3.8 s against 80–140 ms on the render threads. The screens here refresh at 160–164 Hz and smooth scrolling draws a frame per refresh; GPUI builds the whole window each frame. Temporary timers put Kitab's own render functions at about a third of a frame and GPUI's layout at most of the rest; closing the sidebar halved the UI thread (about 370 ms). The contents list was rebuilt, every row of it, on every frame.
+
+- **The contents list is a cached view** (`TocView`): reused while the outline, the page, folds and the look are unchanged. Over a 649-frame scroll it was built 16 times (the page changing). UI thread during the scroll: about 660 ms → 344–547 ms.
+
+`python tools/bench_reading.py`, after both fixes, 01-text-outline.pdf, 1200×800:
+
+| | Working set | Private | CPU idle (10 s) | CPU scrolling | CPU settled |
+|---|---|---|---|---|---|
+| SumatraPDF 3.6.1 | 32 MB | 16 MB | 0.0 % | 6.3 % | 0.0 % |
+| Kitab 0.6.0 (three runs) | 90–93 MB (81–94 after scrolling) | 102–105 MB (116–117 after scrolling, 121–123 at the peak) | 0.2–0.5 % | 7.6–8.3 % | 0.1–0.7 % |

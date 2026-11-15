@@ -33,7 +33,8 @@ an environment switch to turn it off so it can still be benchmarked:
   Touch   Windows touch screens. A finger pans (WM_GESTURE GID_PAN, with inertia)
           as fine scroll steps; a pinch (GID_ZOOM) arrives as a scroll with Ctrl
           held whose y is 200 x ln(ratio), which the app reads as a zoom factor.
-          A wheel message that says Ctrl is down (a touchpad pinch) is believed.
+          A wheel message's own Ctrl and Shift flags decide (a touchpad pinch says
+          Ctrl; a key let go in another window can't leave Kitab zooming).
   MenuKey macOS's menu bar shows a command's key only when it has Ctrl or Cmd
           in it. A key equivalent there is live: with a plain one (N for the
           next page) the menu could take the letter while it is being typed.
@@ -887,11 +888,16 @@ def touch_patch() -> None:
 """,
          """    ) -> Option<isize> {
         let mut modifiers = current_modifiers();
-        // Kitab patch: a pinch on a touchpad is a wheel message that says
-        // Ctrl is down (MK_CONTROL) while the key itself is not.
-        if wparam.0 & 0x0008 != 0 {
-            modifiers.control = true;
-        }
+        // Kitab patch: Ctrl and Shift as the wheel message itself says
+        // (MK_CONTROL, MK_SHIFT), not the window thread's key state. That
+        // state goes stale when a key is let go while another window has
+        // the keyboard (Ctrl held while switching away), and Windows wheels
+        // the window under the pointer even unfocused: every notch zoomed
+        // instead of scrolling until a key was pressed in Kitab. A pinch on
+        // a touchpad is a wheel message with MK_CONTROL while the key itself
+        // is up, which this keeps.
+        modifiers.control = wparam.0 & 0x0008 != 0;
+        modifiers.shift = wparam.0 & 0x0004 != 0;
         let mut lock = self.state.borrow_mut();
         let Some(mut func) = lock.callbacks.input.take() else {
             return Some(1);

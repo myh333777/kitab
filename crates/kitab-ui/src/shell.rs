@@ -114,6 +114,21 @@ pub struct Workspace {
     /// Bumped on each open so the slide and the row stagger replay; 0 = no motion
     /// (the start-up layout must match the first frame exactly).
     sidebar_serial: u64,
+    /// The contents list as a view of its own, so a frame that only moves
+    /// the page (smooth scrolling draws at the display's rate, 160 frames a
+    /// second on some screens) reuses it instead of building every row
+    /// again: that was nearly half of each frame.
+    toc_view: Option<Entity<TocView>>,
+    /// What the contents list last showed; it's built afresh when this
+    /// changes, and reused while it doesn't.
+    toc_key: Option<TocKey>,
+    /// The document the contents list is for, set as the sidebar draws.
+    toc_reader: Option<Entity<Reader>>,
+    /// Bumped when a section is folded or unfolded.
+    toc_folds: u64,
+    /// Bumped whenever the look changes (theme, density, text size…).
+    style_serial: u64,
+    _style_watch: Subscription,
     home_serial: u64,
     /// Set after the first frame: tabs opened later fade in.
     booted: bool,
@@ -263,6 +278,12 @@ impl Workspace {
             closed: Vec::new(),
             sidebar_closing: false,
             sidebar_serial: 0,
+            toc_view: None,
+            toc_key: None,
+            toc_reader: None,
+            toc_folds: 0,
+            style_serial: 0,
+            _style_watch: cx.observe_global::<Style>(|ws, _| ws.style_serial += 1),
             side_pane: SidePane::Contents,
             home_serial: 0,
             booted: false,
@@ -1480,26 +1501,8 @@ impl Workspace {
         st: &Style,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut rows = Vec::new();
-        let mut current = 0;
-        let mut markdown = false;
-        if let Some(r) = reader.map(|r| r.read(cx)) {
-            flatten(
-                r.outline(),
-                0,
-                &mut Vec::new(),
-                self.toc_toggled.get(&r.path),
-                &mut rows,
-            );
-            current = r.current_page() as u32;
-            markdown = r.is_markdown();
-        }
         let tabs_here = st.tabs == TabsAt::Sidebar && st.shows_tabs();
         let tabs_panel = tabs_here.then(|| self.vertical_tabs(st, cx));
-        // The current entry: the last one whose page is at or before the current page.
-        let active_ix = rows
-            .iter()
-            .rposition(|row| row.item.page.is_some_and(|p| p <= current));
         let Some(reader) = reader.cloned() else {
             // Home with tabs in the sidebar: only the open documents.
             return self.sidebar_frame(tabs_panel, None, st, cx);
@@ -1520,6 +1523,62 @@ impl Workspace {
             let pane = self.signatures_pane(&reader, st, cx);
             return self.sidebar_frame(tabs_panel, Some(pane), st, cx);
         }
+        // Contents: reused from the last frame while what it shows is the
+        // same (the page it's on decides the ringed entry).
+        let r = reader.read(cx);
+        let key = TocKey {
+            reader: reader.entity_id(),
+            outline: outline_hash(r.outline()),
+            page: r.current_page(),
+            markdown: r.is_markdown(),
+            folds: self.toc_folds,
+            serial: self.sidebar_serial,
+            style: self.style_serial,
+        };
+        self.toc_reader = Some(reader.clone());
+        let view = match &self.toc_view {
+            Some(v) => v.clone(),
+            None => {
+                let ws = cx.entity().downgrade();
+                let v = cx.new(|_| TocView { ws });
+                self.toc_view = Some(v.clone());
+                v
+            }
+        };
+        let view = gpui::AnyView::from(view);
+        let pane = if self.toc_key == Some(key) {
+            view.cached(gpui::StyleRefinement::default().size_full())
+                .into_any_element()
+        } else {
+            self.toc_key = Some(key);
+            view.into_any_element()
+        };
+        self.sidebar_frame(tabs_panel, Some(pane), st, cx)
+    }
+
+    /// The contents list's rows (drawn by [`TocView`]).
+    fn toc_list(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let st = Style::get(cx).clone();
+        let st = &st;
+        let Some(reader) = self.toc_reader.clone() else {
+            return div().into_any_element();
+        };
+        let mut rows = Vec::new();
+        let (current, markdown) = {
+            let r = reader.read(cx);
+            flatten(
+                r.outline(),
+                0,
+                &mut Vec::new(),
+                self.toc_toggled.get(&r.path),
+                &mut rows,
+            );
+            (r.current_page() as u32, r.is_markdown())
+        };
+        // The current entry: the last one whose page is at or before the current page.
+        let active_ix = rows
+            .iter()
+            .rposition(|row| row.item.page.is_some_and(|p| p <= current));
         let mut col = div().flex().flex_col().gap(px(1.0)).p(px(8.0));
         if rows.is_empty() {
             col = col.child(
@@ -1606,6 +1665,7 @@ impl Workspace {
                             if !set.remove(&key) {
                                 set.insert(key.clone());
                             }
+                            ws.toc_folds += 1;
                             cx.notify();
                         }))
                         .child(
@@ -1666,7 +1726,12 @@ impl Workspace {
                 motion::stagger(ix),
             ));
         }
-        self.sidebar_frame(tabs_panel, Some(col.into_any_element()), st, cx)
+        div()
+            .id("toc-list")
+            .size_full()
+            .overflow_y_scroll()
+            .child(col)
+            .into_any_element()
     }
 
     /// The Marks pane: export, then one row per mark or annotation.
@@ -3063,6 +3128,50 @@ fn cover(title: &str, width: f32, st: &Style) -> AnyElement {
                 .child(initial),
         )
         .into_any_element()
+}
+
+/// What the contents list shows: when any of it changes, the list is built
+/// again; otherwise last frame's is reused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TocKey {
+    reader: gpui::EntityId,
+    /// The outline's titles, pages and shape (loaded later, reloaded, a
+    /// Markdown heading edited).
+    outline: u64,
+    page: usize,
+    markdown: bool,
+    folds: u64,
+    serial: u64,
+    style: u64,
+}
+
+/// A fingerprint of an outline: titles, pages and nesting.
+fn outline_hash(items: &[OutlineItem]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    fn walk(items: &[OutlineItem], h: &mut std::collections::hash_map::DefaultHasher) {
+        items.len().hash(h);
+        for i in items {
+            i.title.hash(h);
+            i.page.hash(h);
+            walk(&i.children, h);
+        }
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    walk(items, &mut h);
+    h.finish()
+}
+
+/// The sidebar's contents list as its own view (see `Workspace::toc_view`).
+pub(crate) struct TocView {
+    ws: gpui::WeakEntity<Workspace>,
+}
+
+impl Render for TocView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ws
+            .update(cx, |ws, cx| ws.toc_list(cx))
+            .unwrap_or_else(|_| div().into_any_element())
+    }
 }
 
 impl Render for Workspace {
