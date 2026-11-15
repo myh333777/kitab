@@ -76,6 +76,11 @@ pub(super) struct HomeView {
     busy: usize,
     /// Dropped covers, freed from the GPU on the next frame.
     evicted: Vec<Arc<RenderImage>>,
+    /// Covers painted from pixels in memory last frame: on the GPU now, so
+    /// the copy in memory goes (as pages do); up to 20 MB on a big shelf.
+    painted: Rc<std::cell::RefCell<Vec<PathBuf>>>,
+    /// The GPU's lost-texture count when covers were last checked.
+    seen_misses: usize,
     /// The card under the pointer, and the one it just left (it settles).
     hover: Option<usize>,
     left: Option<usize>,
@@ -103,6 +108,8 @@ impl HomeView {
             queue: VecDeque::new(),
             busy: 0,
             evicted: Vec::new(),
+            painted: Rc::default(),
+            seen_misses: 0,
             hover: None,
             left: None,
             width: 1000.0,
@@ -124,6 +131,27 @@ impl HomeView {
     pub(super) fn free_dropped(&mut self, window: &mut Window) {
         for image in self.evicted.drain(..) {
             window.drop_image(image).ok();
+        }
+        // The GPU lost its textures: covers kept only there load again.
+        let misses = gpui::kitab_image_misses();
+        if misses != self.seen_misses {
+            self.seen_misses = misses;
+            self.covers
+                .retain(|_, c| !matches!(c, Cover::Ready(i, _) if i.kitab_is_husk()));
+            let covers = &self.covers;
+            self.order.retain(|p| covers.contains_key(p));
+        }
+    }
+
+    /// Covers painted last frame keep only their GPU copy.
+    fn slim_painted(&mut self) {
+        let paths: Vec<PathBuf> = self.painted.borrow_mut().drain(..).collect();
+        for path in paths {
+            if let Some(Cover::Ready(image, _)) = self.covers.get_mut(&path)
+                && !image.kitab_is_husk()
+            {
+                *image = Arc::new(RenderImage::kitab_husk(image));
+            }
         }
     }
 
@@ -513,6 +541,28 @@ impl Workspace {
         };
         let face = match state {
             CoverState::Ready(image, at) => {
+                // Painted right after the picture, so its texture is on the
+                // GPU by then and the copy in memory can go.
+                let slim = (!image.kitab_is_husk()).then(|| {
+                    let (painted, path, this) =
+                        (self.home.painted.clone(), item.path.clone(), cx.weak_entity());
+                    gpui::canvas(
+                        |_, _, _| (),
+                        move |_, _, window, cx| {
+                            let first = painted.borrow().is_empty();
+                            painted.borrow_mut().push(path.clone());
+                            if first {
+                                window.defer(cx, move |_, cx| {
+                                    let _ = this.update(cx, |ws, _| ws.home.slim_painted());
+                                });
+                            }
+                        },
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_0()
+                });
                 let picture = div()
                     .w(px(width))
                     .h(px(width * 1.5))
@@ -521,12 +571,14 @@ impl Workspace {
                     .overflow_hidden()
                     .bg(gpui::white())
                     .shadow(st.elev())
+                    .relative()
                     .child(
                         img(image)
                             .w(px(width))
                             .h(px(width * 1.5))
                             .object_fit(ObjectFit::Cover),
-                    );
+                    )
+                    .children(slim);
                 // A cover that just arrived fades in instead of popping.
                 if st.animations && at.elapsed() < COVER_FADE {
                     use std::hash::{Hash, Hasher};

@@ -28,6 +28,20 @@ pub(super) struct Layers {
     pub links_pending: HashSet<u32>,
     pub chars: HashMap<u32, Rc<Vec<TextChar>>>,
     pub chars_pending: HashSet<u32>,
+    /// Each page's links ready to draw, worked out once: telling a footnote
+    /// mark from a link scans the page's characters, which on every frame
+    /// cost links × characters. Kept with whether the characters were known
+    /// then; they arriving later means working it out again.
+    pub link_info: std::cell::RefCell<HashMap<u32, PageLinks>>,
+}
+
+/// A page's links ready to draw, and whether its characters were known.
+type PageLinks = (bool, Rc<Vec<LinkInfo>>);
+
+/// A link as drawn: its target and its tooltip (which says whether it's a footnote mark).
+pub(super) struct LinkInfo {
+    link: Link,
+    tip: SharedString,
 }
 
 impl Layers {
@@ -38,6 +52,10 @@ impl Layers {
         }
         if self.chars.len() > TRIM_AT {
             self.chars.retain(|p, _| near(p));
+        }
+        let info = self.link_info.get_mut();
+        if info.len() > TRIM_AT {
+            info.retain(|p, _| near(p));
         }
     }
 }
@@ -65,6 +83,7 @@ impl Reader {
                 .await;
             let _ = this.update(cx, |r, cx| {
                 r.layers.links_pending.remove(&ix);
+                r.layers.link_info.get_mut().remove(&ix);
                 r.layers.links.insert(ix, Rc::new(links));
                 r.layers.trim(r.current_page() as u32);
                 cx.notify();
@@ -131,27 +150,57 @@ impl Reader {
         st: &Style,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let Some(links) = self.layers.links.get(&(ix as u32)).cloned() else {
+        let page = ix as u32;
+        let Some(links) = self.layers.links.get(&page).cloned() else {
             return Vec::new();
         };
         let size = self.raw_page_size(ix);
         // The page's characters (loaded once the pointer is over it) tell a
         // footnote mark from a link to another page.
-        let chars = self.layers.chars.get(&(ix as u32)).cloned();
-        links
-            .iter()
+        let chars = self.layers.chars.get(&page).cloned();
+        let cached = self
+            .layers
+            .link_info
+            .borrow()
+            .get(&page)
+            .filter(|(knew_chars, _)| *knew_chars == chars.is_some())
+            .map(|(_, info)| info.clone());
+        let info = cached.unwrap_or_else(|| {
+            let info: Rc<Vec<LinkInfo>> = Rc::new(
+                links
+                    .iter()
+                    .map(|link| {
+                        let note = chars.as_ref().is_some_and(|c| {
+                            kitab_core::notes::is_note_mark(&kitab_core::notes::text_in(
+                                c, link.rect,
+                            ))
+                        });
+                        let tip: SharedString = match &link.target {
+                            LinkTarget::Page { .. } if note => "Show the note".into(),
+                            LinkTarget::Page { page, .. } => {
+                                format!("Go to page {}", page + 1).into()
+                            }
+                            LinkTarget::Uri(u) if safe_uri(u) => u.clone().into(),
+                            LinkTarget::Uri(_) => "Kitab doesn't open this kind of link".into(),
+                        };
+                        LinkInfo {
+                            link: link.clone(),
+                            tip,
+                        }
+                    })
+                    .collect(),
+            );
+            self.layers
+                .link_info
+                .borrow_mut()
+                .insert(page, (chars.is_some(), info.clone()));
+            info
+        });
+        info.iter()
             .enumerate()
-            .map(|(i, link)| {
+            .map(|(i, LinkInfo { link, tip })| {
                 let r = rect_to_view(link.rect, size, self.rotation, ppt);
-                let note = chars.as_ref().is_some_and(|c| {
-                    kitab_core::notes::is_note_mark(&kitab_core::notes::text_in(c, link.rect))
-                });
-                let tip: SharedString = match &link.target {
-                    LinkTarget::Page { .. } if note => "Show the note".into(),
-                    LinkTarget::Page { page, .. } => format!("Go to page {}", page + 1).into(),
-                    LinkTarget::Uri(u) if safe_uri(u) => u.clone().into(),
-                    LinkTarget::Uri(_) => "Kitab doesn't open this kind of link".into(),
-                };
+                let tip = tip.clone();
                 let link = link.clone();
                 div()
                     .id(("link", ix * 10_000 + i))

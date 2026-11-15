@@ -97,6 +97,23 @@ pub(crate) fn open(
     password: Option<&str>,
     layout: BookLayout,
 ) -> Result<(OpenDoc, DocInfo), OpenError> {
+    let doc = open_doc(path, password, layout)?;
+    let mut info = describe(&doc.pdf, doc.format, doc.page_count, doc.reflowable);
+    info.right_to_left = doc.right_to_left;
+    if let Some(crate::source::Source::Djvu(d)) = doc.source.as_deref() {
+        info.outline = crate::djvu::outline(d, doc.page_count);
+    }
+    Ok((doc, info))
+}
+
+/// Open a document without describing it (no page sizes, outline or
+/// metadata): what a render helper needs, since the reader already has
+/// the description from the first open.
+pub(crate) fn open_doc(
+    path: &Path,
+    password: Option<&str>,
+    layout: BookLayout,
+) -> Result<OpenDoc, OpenError> {
     if !layout.is_valid() {
         return Err(failed("bad book layout"));
     }
@@ -224,23 +241,15 @@ pub(crate) fn open(
     } else {
         format
     };
-    let mut info = describe(&handle, format, page_count, reflowable);
-    info.right_to_left = right_to_left;
-    if let Some(crate::source::Source::Djvu(d)) = source.as_deref() {
-        info.outline = crate::djvu::outline(d, page_count);
-    }
-    Ok((
-        OpenDoc {
-            pdf: handle,
-            page_count,
-            format,
-            reflowable,
-            right_to_left,
-            paper: if flows { layout.style.paper } else { None },
-            source,
-        },
-        info,
-    ))
+    Ok(OpenDoc {
+        pdf: handle,
+        page_count,
+        format,
+        reflowable,
+        right_to_left,
+        paper: if flows { layout.style.paper } else { None },
+        source,
+    })
 }
 
 /// Try the password as typed, then its NFC and NFKC forms. MuPDF applies
@@ -277,7 +286,15 @@ pub(crate) fn can_fill_forms(pdf: &PdfDocument) -> bool {
 }
 
 fn describe(handle: &Handle, format: Format, page_count: u32, reflowable: bool) -> DocInfo {
-    let page_sizes = (0..page_count).map(|i| page_size(handle, i)).collect();
+    // A PDF's sizes come from its page tree; loading every page (with its
+    // annotations and resources) only to measure it made opening a long
+    // PDF slow and left every page's objects parsed in memory.
+    let page_sizes = (0..page_count)
+        .map(|i| match handle {
+            Handle::Pdf(pdf) => pdf_page_size(pdf, i).unwrap_or_else(|| page_size(handle, i)),
+            Handle::Other(_) => page_size(handle, i),
+        })
+        .collect();
     let (outline, permissions, encryption, repaired) = match handle {
         Handle::Pdf(pdf) => (
             load_outline(pdf, page_count),
@@ -353,6 +370,66 @@ pub(crate) fn relayout(doc: &mut OpenDoc, layout: BookLayout) -> Result<DocInfo,
     let mut info = describe(&doc.pdf, doc.format, page_count, true);
     info.right_to_left = doc.right_to_left;
     Ok(info)
+}
+
+/// A PDF page's size read from the page tree, as MuPDF's page bounds work
+/// it out (`pdf_page_obj_transform_box`) without loading the page: the
+/// MediaBox (US Letter when missing), cut to the CropBox, times UserUnit,
+/// turned by /Rotate. `None` when the page tree can't say; the caller then
+/// loads the page.
+pub(crate) fn pdf_page_size(pdf: &PdfDocument, index: u32) -> Option<SizePt> {
+    let page = pdf.find_page(i32::try_from(index).ok()?).ok()?;
+    let rect = |key: &str| -> Option<[f32; 4]> {
+        let a = page.get_dict_inheritable(key).ok()??;
+        if !a.is_array().ok()? || a.len().ok()? < 4 {
+            return None;
+        }
+        let mut v = [0.0f32; 4];
+        for (k, slot) in v.iter_mut().enumerate() {
+            *slot = a.get_array(k as i32).ok()??.as_float().ok()?;
+        }
+        if !v.iter().all(|x| x.is_finite()) {
+            return None;
+        }
+        Some([v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3])])
+    };
+    let mut media = rect("MediaBox").unwrap_or([0.0, 0.0, 612.0, 792.0]);
+    if media[2] - media[0] < 1.0 || media[3] - media[1] < 1.0 {
+        // MuPDF falls back to the unit square, then to Letter at load:
+        // leave such pages to the slow path, which agrees with it.
+        return None;
+    }
+    if let Some(crop) = rect("CropBox") {
+        let cut = [
+            media[0].max(crop[0]),
+            media[1].max(crop[1]),
+            media[2].min(crop[2]),
+            media[3].min(crop[3]),
+        ];
+        if cut[2] > cut[0] && cut[3] > cut[1] {
+            media = cut;
+        } else {
+            return None;
+        }
+    }
+    let unit = page
+        .get_dict("UserUnit")
+        .ok()
+        .flatten()
+        .and_then(|u| u.as_float().ok())
+        .filter(|u| u.is_finite() && *u > 0.0)
+        .unwrap_or(1.0);
+    let rotate = page
+        .get_dict_inheritable("Rotate")
+        .ok()
+        .flatten()
+        .and_then(|r| r.as_int().ok())
+        .unwrap_or(0);
+    // MuPDF rounds /Rotate to the nearest quarter turn.
+    let quarter = ((rotate.rem_euclid(360) + 45) / 90) % 4;
+    let (w, h) = ((media[2] - media[0]) * unit, (media[3] - media[1]) * unit);
+    let (w, h) = if quarter % 2 == 1 { (h, w) } else { (w, h) };
+    (w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0).then_some(SizePt { w, h })
 }
 
 /// A page's own size with its /Rotate applied (MuPDF's page bounds).
@@ -769,4 +846,48 @@ pub(crate) fn write_pdf(doc: &OpenDoc, pages: &[u32], out: &Path) -> Result<u32,
     // Dropping the writer closes the file.
     drop(writer);
     u32::try_from(pages.len()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::{page_size, pdf_page_size};
+    use mupdf::pdf::PdfDocument;
+
+    /// Sizes read from the page tree match MuPDF's own page bounds on every
+    /// test PDF (mixed sizes, rotated pages, crop boxes, broken files).
+    #[test]
+    fn page_tree_sizes_match_loaded_pages() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/pdf");
+        // KITAB_SIZE_DIR adds a folder of other PDFs to compare (read only).
+        let extra = std::env::var_os("KITAB_SIZE_DIR").map(std::path::PathBuf::from);
+        let mut checked = 0;
+        let entries = std::fs::read_dir(&dir)
+            .unwrap()
+            .chain(extra.iter().flat_map(|d| std::fs::read_dir(d).into_iter().flatten()));
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("pdf") {
+                continue;
+            }
+            let Ok(pdf) = PdfDocument::open(path.to_str().unwrap()) else {
+                continue;
+            };
+            if pdf.needs_password().unwrap_or(true) {
+                continue;
+            }
+            let count = pdf.page_count().unwrap_or(0).max(0) as u32;
+            for i in 0..count {
+                if let Some(fast) = pdf_page_size(&pdf, i) {
+                    let slow = page_size(&pdf, i);
+                    assert!(
+                        (fast.w - slow.w).abs() < 0.01 && (fast.h - slow.h).abs() < 0.01,
+                        "{} page {i}: page tree {fast:?}, loaded {slow:?}",
+                        path.display()
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 50, "only {checked} pages compared");
+    }
 }

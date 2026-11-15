@@ -2181,7 +2181,8 @@ impl Render for Reader {
         let misses = gpui::kitab_image_misses();
         if misses != self.seen_misses {
             self.seen_misses = misses;
-            if self.cache.drop_husks() {
+            let pages = self.cache.drop_husks();
+            if pages | self.tiles.drop_husks() {
                 cx.notify();
             }
         }

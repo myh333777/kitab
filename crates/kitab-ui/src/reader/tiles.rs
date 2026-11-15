@@ -39,6 +39,9 @@ pub(super) struct Tiles {
     order: VecDeque<TileKey>,
     pending: HashSet<TileKey>,
     evicted: Vec<Arc<RenderImage>>,
+    /// Tiles painted from pixels in memory last frame: on the GPU now, so
+    /// the copy in memory can go, as pages do (up to 128 MB at deep zoom).
+    painted: std::rc::Rc<std::cell::RefCell<Vec<TileKey>>>,
 }
 
 impl Tiles {
@@ -60,6 +63,27 @@ impl Tiles {
     /// Tiles let go of since the last call (their GPU textures can go).
     pub(super) fn take_evicted(&mut self) -> Vec<Arc<RenderImage>> {
         std::mem::take(&mut self.evicted)
+    }
+
+    /// Tiles painted last frame keep only their GPU copy (a husk).
+    pub(super) fn slim_painted(&mut self) {
+        let keys: Vec<TileKey> = self.painted.borrow_mut().drain(..).collect();
+        for key in keys {
+            if let Some(image) = self.map.get_mut(&key)
+                && !image.kitab_is_husk()
+            {
+                *image = Arc::new(RenderImage::kitab_husk(image));
+            }
+        }
+    }
+
+    /// The GPU lost its textures: tiles kept only there are drawn again.
+    pub(super) fn drop_husks(&mut self) -> bool {
+        let before = self.map.len();
+        self.map.retain(|_, i| !i.kitab_is_husk());
+        let map = &self.map;
+        self.order.retain(|k| map.contains_key(k));
+        before != self.map.len()
     }
 }
 
@@ -134,6 +158,8 @@ impl Reader {
             first..=last
         };
         let mut out = Vec::new();
+        // Tiles shown from pixels in memory this frame (slimmed after it).
+        let mut fresh = Vec::new();
         let base = TileKey {
             page: ix as u32,
             scale_key: scale_key(scale),
@@ -155,7 +181,11 @@ impl Reader {
                     continue;
                 }
                 match self.tiles.map.get(&key) {
-                    Some(image) => out.push(
+                    Some(image) => {
+                        if !image.kitab_is_husk() {
+                            fresh.push(key);
+                        }
+                        out.push(
                         img(ImageSource::Render(image.clone()))
                             .absolute()
                             .left(px(rect.x as f32 / sf))
@@ -163,10 +193,36 @@ impl Reader {
                             .w(px(rect.w as f32 / sf))
                             .h(px(rect.h as f32 / sf))
                             .into_any_element(),
-                    ),
+                        )
+                    }
                     None => self.request_tile(key, rect, scale, cx),
                 }
             }
+        }
+        // Painted after the tiles, so their textures are on the GPU by then
+        // (as `page_sheet` does for pages).
+        if !fresh.is_empty() {
+            let painted = self.tiles.painted.clone();
+            let this = cx.weak_entity();
+            out.push(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |_, _, window, cx| {
+                        let first = painted.borrow().is_empty();
+                        painted.borrow_mut().extend(fresh.iter().copied());
+                        if first {
+                            window.defer(cx, move |_, cx| {
+                                let _ = this.update(cx, |r, _| r.tiles.slim_painted());
+                            });
+                        }
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_0()
+                .into_any_element(),
+            );
         }
         out
     }

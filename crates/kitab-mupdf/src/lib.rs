@@ -423,7 +423,7 @@ impl Engine {
                 return Ok::<_, String>(None);
             }
             if helper && !state.docs.contains_key(&doc) {
-                let (mut opened, _) = doc::open(&path, password.as_deref(), layout)
+                let mut opened = doc::open_doc(&path, password.as_deref(), layout)
                     .map_err(|e| format!("a render helper could not open the file: {e:?}"))?;
                 // The form as the reader has filled it in so far.
                 let pages = opened.page_count;
