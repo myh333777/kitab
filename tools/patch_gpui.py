@@ -528,6 +528,28 @@ struct WindowInvalidatorInner {"""),
         self.state.borrow_mut().callbacks.request_frame = Some(request_frame);
         Some(0)"""),
     ])
+    #    Paths can be moved: a stroke (a pen mark) is tessellated once at
+    #    the page's corner and placed where the page is each frame, instead
+    #    of being tessellated again on every frame of a scroll.
+    edit("src/scene.rs", [
+        ("""    /// Scale this path by the given factor.
+    pub fn scale(&self, factor: f32) -> Path<ScaledPixels> {""",
+         """    /// Kitab patch: this path moved by `by` (moving vertices costs far
+    /// less than tessellating the stroke again).
+    pub fn kitab_offset(&self, by: Point<Pixels>) -> Path<Pixels> {
+        let mut p = self.clone();
+        p.bounds.origin = p.bounds.origin + by;
+        p.start = p.start + by;
+        p.current = p.current + by;
+        for v in &mut p.vertices {
+            v.xy_position = v.xy_position + by;
+        }
+        p
+    }
+
+    /// Scale this path by the given factor.
+    pub fn scale(&self, factor: f32) -> Path<ScaledPixels> {"""),
+    ])
     #    And a frame that ends still wanting another (a notify that came in
     #    while it drew, an animation's next step) asks for it again.
     edit("src/window.rs", [

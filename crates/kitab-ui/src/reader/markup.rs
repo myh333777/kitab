@@ -125,8 +125,18 @@ pub(super) enum Edit {
     },
 }
 
+/// Strokes tessellated once, by a hash of their page-local points, width
+/// and closure; painted each frame moved to where the page is.
+pub(super) type StrokeCache = std::rc::Rc<std::cell::RefCell<std::collections::HashMap<u64, gpui::Path<Pixels>>>>;
+
+/// Strokes kept before the cache starts afresh (marks across many pages
+/// and zoom levels).
+const STROKES_KEPT: usize = 4096;
+
 #[derive(Default)]
 pub(super) struct MarkupState {
+    /// Tessellated strokes of the marks shown (see [`StrokeCache`]).
+    pub strokes: StrokeCache,
     /// The bar is showing.
     pub open: bool,
     pub tool: Option<Tool>,
@@ -1176,12 +1186,16 @@ impl Reader {
             return None;
         }
         let (size, rotation) = (self.raw_page_size(ix), self.rotation);
+        let strokes = self.markup.strokes.clone();
         Some(
             canvas(
                 |_, _, _| (),
                 move |bounds, _, window, cx| {
+                    if strokes.borrow().len() > STROKES_KEPT {
+                        strokes.borrow_mut().clear();
+                    }
                     for m in &marks {
-                        paint_mark(m, bounds, size, rotation, ppt, window, cx);
+                        paint_mark(m, bounds, size, rotation, ppt, &strokes, window, cx);
                     }
                 },
             )
@@ -1800,12 +1814,14 @@ impl Reader {
 }
 
 /// Paint one mark onto the page sheet whose bounds are `bounds`.
+#[allow(clippy::too_many_arguments)]
 fn paint_mark(
     m: &Mark,
     bounds: Bounds<Pixels>,
     page: SizePt,
     rotation: u16,
     ppt: f32,
+    strokes: &StrokeCache,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -1821,7 +1837,27 @@ fn paint_mark(
     };
     let width = (m.width * ppt).max(1.0);
     let stroke = |points: &[gpui::Point<Pixels>], closed: bool, window: &mut Window| {
-        let [first, rest @ ..] = points else { return };
+        // Built at the page's corner and cached: tessellating every stroke on
+        // every frame made scrolling a marked-up page much slower.
+        let origin = bounds.origin;
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (width.to_bits(), closed, points.len()).hash(&mut h);
+            for p in points {
+                (f32::from(p.x - origin.x).to_bits(), f32::from(p.y - origin.y).to_bits()).hash(&mut h);
+            }
+            h.finish()
+        };
+        if let Some(path) = strokes.borrow().get(&key) {
+            window.paint_path(path.kitab_offset(origin), colour);
+            return;
+        }
+        let points: Vec<gpui::Point<Pixels>> = points
+            .iter()
+            .map(|p| gpui::point(p.x - origin.x, p.y - origin.y))
+            .collect();
+        let [first, rest @ ..] = points.as_slice() else { return };
         let options = StrokeOptions::default()
             .with_line_width(width)
             .with_line_cap(LineCap::Round)
@@ -1839,7 +1875,8 @@ fn paint_mark(
             path.close();
         }
         if let Ok(path) = path.build() {
-            window.paint_path(path, colour);
+            window.paint_path(path.kitab_offset(origin), colour);
+            strokes.borrow_mut().insert(key, path);
         }
     };
     let quad = |r: RectPt, window: &mut Window| {
