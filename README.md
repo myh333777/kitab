@@ -102,12 +102,68 @@ On macOS, the first launch may say Kitab "is damaged and can't be opened" or "ca
 
 Kitab is a native program. The window, the tabs and every page are drawn by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui), the GPU UI framework the Zed editor is built on, and the pages come from [MuPDF](https://mupdf.com/), the engine behind SumatraPDF. Nothing in between is a web page.
 
-The speed comes from a few rules the code is held to ([AGENTS.md](AGENTS.md)):
+```mermaid
+flowchart LR
+    open([You open a file]) --> win
 
-- **Nothing extra before the first page.** On Windows the first page is painted with plain GDI while the GPU window starts up behind it, so a double-clicked PDF shows its page straight away. Update checks, keymaps, thumbnails and the library wait until after.
-- **The UI thread never waits.** Opening, rendering, searching and saving run on a pool of MuPDF workers. Several threads render one document's pages at once, and a quick soft render stands in while the sharp one draws.
-- **Only what you can see.** Pages and thumbnails outside the view are skipped, and the page cache is capped in bytes, not pages, so memory stays bounded however long the document is.
-- **Measured against SumatraPDF.** `kitab-bench` times start-up, first page, scrolling and memory against SumatraPDF on the same machine, from the app's own window. The 0.1.0 numbers will be published with the release, measured, not estimated.
+    subgraph ui [UI thread: never waits]
+        direction TB
+        win[Window drawn off screen,<br/>shown with page 1 in it]
+        view[Only the pages in view<br/>are asked for]
+        frame[A frame is drawn only<br/>when something changed]
+        win --> view --> frame
+    end
+
+    subgraph work [Background threads]
+        direction TB
+        pool[MuPDF worker pool:<br/>a quick soft page first,<br/>then the sharp one]
+        tiles[Deep zoom: only the<br/>visible tiles, drawn sharp]
+        lib[Library, search index<br/>and file checks]
+    end
+
+    subgraph mem [Memory with a ceiling]
+        direction TB
+        cache[Page cache capped<br/>in megabytes]
+        idle[Background tabs let<br/>their pages go]
+    end
+
+    view -- render request --> pool
+    view -. very large page .-> tiles
+    pool --> cache
+    tiles --> cache
+    cache -- GPU texture --> frame
+    view -. saves and lookups .-> lib
+    cache --- idle
+```
+
+- **The page is in the window when it appears.** The window lays out and draws page 1 while hidden, then shows up with it. Update checks, keymaps, thumbnails and the library wait until after. With several tabs to restore, the one you were reading opens first and the rest follow.
+- **The UI thread never waits.** Opening, rendering, searching, indexing and saving run on other threads. Several threads render one document's pages at once, and a quick soft render stands in while the sharp one draws.
+- **Only what you can see.** Pages and thumbnails outside the view are skipped. A huge page (a map at 500 %) is drawn as a softer whole page with sharp tiles for just the part on screen.
+- **Bounded memory.** The page cache is capped in megabytes, not pages, so memory stays the same however long the document is. Tabs in the background let their pages go.
+- **Nothing runs while you read.** A frame is drawn only when something changed or an animation is playing, so an idle Kitab uses no CPU.
+
+### Measured
+
+Against SumatraPDF 3.6.1 on the same Windows 11 machine (Ryzen 9 9900X, RTX 5070): the 40-page `01-text-outline.pdf` in a 1200×800 window, timed from outside the app by [`kitab-bench`](crates/kitab-bench) and `tools/bench_reading.py`. The full runs are in [docs/perf/baseline.md](docs/perf/baseline.md).
+
+```mermaid
+xychart-beta
+    title "Idle CPU with a document open (% of one core)"
+    x-axis ["Kitab, every refresh", "Kitab, frames on demand", "SumatraPDF 3.6.1"]
+    y-axis "CPU %" 0 --> 3
+    bar [2.2, 0.0, 0.0]
+```
+
+| | Kitab | SumatraPDF 3.6.1 |
+|---|---|---|
+| Window on screen | 199 ms, with the page already in it | 90 ms, blank at first |
+| Page fully drawn | 199–225 ms | 90–312 ms |
+| CPU used to reach the page | 203 ms | 203 ms |
+| CPU while idle | 0 % | 0 % |
+| CPU while scrolling | 2–7 % | 2 % |
+| Private memory, one document | 129 MB (156 MB after scrolling) | 15 MB |
+
+SumatraPDF is lighter on memory because it draws with GDI. About 88 MB of Kitab's share is the GPU device, the graphics driver and DirectWrite, paid once whatever you open.
 
 ## What it opens
 
@@ -128,39 +184,56 @@ Kitab is a document reader, so it leaves image files to your image viewer.
 **Reading**
 - Each page keeps its own size and shape, so mixed portrait and landscape PDFs look right
 - Fit width, fit page, actual size, Ctrl+wheel zoom and rotation; choose how new documents open
+- One page across, two side by side, or a book's spreads with the cover alone (Ctrl+6, Ctrl+7, Ctrl+8)
+- Page colour: the document's own, dark pages, or your theme's paper and ink
 - Smooth scrolling with the mouse wheel and the keys (it can be turned off)
 - Touch screens on Windows: drag to scroll, pinch to zoom
-- Remembers the page, zoom and layout of every file, and reopens your tabs after a restart
+- Remembers the page, zoom and layout of every file, and reopens your tabs after a restart (or starts on Home, or the last file)
 - Find (Ctrl+F) with match case and whole word, hits highlighted on the page
-- Read aloud (Ctrl+Shift+U) with your system's voices: pick the voice, speed and tone; the word being read is marked and the pages follow
-- Contents, page thumbnails, bookmarks (Ctrl+D) and your marks, all in the sidebar
+- Read aloud (Ctrl+Shift+U) with your system's voices, Markdown too. The dock's speaker opens play, pause, a sentence back or on, and the speed, tone and voice, which change as it reads. The word being read is marked and the pages follow (or stay put)
+- Contents (with folding sections), page thumbnails, bookmarks (Ctrl+D) and your marks, all in the sidebar
+- PDFs reload by themselves when another program changes them
 - Back and forward through where you've been, with Alt+Left and the mouse's side buttons
-- Presentation mode (F5): one page at a time, full screen on black
-- Minimal mode (F11) hides everything but the page
+- Presentation mode (F5): one page at a time, full screen on black; type a page number to jump, B or W to blank the screen
+- Focus mode (F11) hides everything but the page; Esc brings it all back
 
 **Books**
 - Pages re-flow to fill the window, and zoom changes the text size
 - Typeface (the book's own, serif, sans or mono), line spacing and margins
 - Right-to-left books turn the other way, and fixed-layout books keep their spreads
+- Comics can read right to left, for manga
 
 **Markdown**
 - Reads like a document, not a code file, with an outline in the sidebar
 - Math typeset natively, Mermaid diagrams drawn in your theme's colours
 - Edit beside a live preview (Ctrl+E), and it reloads when another editor saves the file
+- Choose the typeface for code
 
 **Marks and notes**
 - Highlight, underline or strike through text, add notes and text boxes
 - Pen, highlighter, lines, arrows, rectangles and ellipses, in any colour you can type as hex
-- Ctrl+S saves marks into the PDF as standard annotations, which other readers show too
+- Ctrl+S saves marks into the PDF as standard annotations, which other readers show too, or save a copy with them and leave the original as it is
+- Fill in PDF forms: checkboxes, radio buttons, lists and text fields, with undo
 - Export your marks to Markdown or CSV
 
+**Library**
+- Home shows your books as covers or a list, on shelves: Recent, All, Favourites, In progress, Finished and your own collections
+- Watched folders bring in every document they hold
+- Library search finds words inside every document you've opened, and books by title, author or file name
+- Reading stats: time read today and this week, your streak, and a bar per day
+- Remove a book from Home, or Locate… one that moved (its place, bookmarks and marks follow it)
+
 **PDF tools, on your machine**
+- Print (Ctrl+P) through the system's own print dialog: all pages, this page or a range, fit to paper or actual size
+- Sign PDFs with a certificate file (.pfx, .p12), and see signatures checked when a PDF opens
+- Page tools: delete, move or turn pages, compress, add page numbers or a watermark
 - Save pages as a new PDF, merge PDFs, save a page as PDF, image or text
 - Split view: two documents side by side
 
 **Keyboard and look**
-- SumatraPDF's shortcuts where it has one, a command palette (Ctrl+K), and a `keymap.json` for your own
-- Ten themes (Dark, Gray, Light, Paper, Sand, Linen, Ink, Nord, Noctua, Vampire), any accent colour, three densities
+- SumatraPDF's shortcuts where it has one, and a `keymap.json` for your own
+- A command palette (Ctrl+K) that finds commands, open tabs, recent files and headings
+- Ten themes (Dark, Gray, Light, Paper, Sand, Linen, Ink, Nord, Noctua, Vampire), any accent colour, three densities; it can follow the system's light and dark mode
 - A quick dock you can move to any edge, choose the buttons of, or tuck away
 - An optional menu bar (File, Edit, View, Go, Tools, Help) with Alt-key access, off until you turn it on; on macOS the same menus are in the system menu bar
 
@@ -168,7 +241,7 @@ Kitab is a document reader, so it leaves image files to your image viewer.
 - One window: double-clicking another file opens it as a tab
 - Page thumbnails in File Explorer, and Settings to make Kitab the default app per file type
 
-**Coming next:** native printing, verifying and signing PDFs, more page tools, and library search. The [roadmap](docs/PLAN.md#12-roadmap) has the order.
+**Coming next:** an accessibility pass for screen readers, a short first-run tour, and code-signed downloads. The [roadmap](docs/PLAN.md#12-roadmap) has the order.
 
 ## Privacy
 
@@ -214,13 +287,13 @@ crates/
   kitab-shell    the File Explorer thumbnail provider
   kitab-bench    start-up and scroll benchmarks against SumatraPDF
 docs/PLAN.md     decisions, architecture, performance budgets, roadmap
+docs/perf/       benchmark runs against SumatraPDF
 DESIGN.md        the design system: tokens, depth, type, components, motion
-AGENTS.md        rules for changing the code
 ```
 
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md) first. Commits follow [Conventional Commits](https://www.conventionalcommits.org/), every user-visible change adds a line to [CHANGELOG.md](CHANGELOG.md), and a bug fix comes with a test that fails without it.
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/), every user-visible change adds a line to [CHANGELOG.md](CHANGELOG.md), and a bug fix comes with a test that fails without it.
 
 ## Support
 
