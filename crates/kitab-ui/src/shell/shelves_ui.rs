@@ -30,6 +30,12 @@ pub(super) struct ShelfState {
     pub library_size: usize,
     /// The watched folders are being looked through.
     pub scanning: bool,
+    /// Each shelf as last loaded: going back to one shows it at once, and
+    /// the fresh copy replaces it when it comes.
+    pub cache: std::collections::HashMap<ShelfKind, Vec<RecentItem>>,
+    /// Counts loads, so a slow one that ends after a newer one began is
+    /// dropped.
+    pub load: u64,
 }
 
 /// Naming a collection: a new one (and the document to put in it), or a
@@ -48,6 +54,8 @@ impl Workspace {
     pub(crate) fn refresh_shelves(&mut self, cx: &mut Context<Self>) {
         let library = self.library.clone();
         let kind = self.shelves.kind;
+        self.shelves.load += 1;
+        let load = self.shelves.load;
         cx.spawn(async move |this, cx| {
             let (collections, items, size) = cx
                 .background_spawn(async move {
@@ -61,6 +69,10 @@ impl Workspace {
                 })
                 .await;
             let _ = this.update(cx, |ws, cx| {
+                // Another shelf, or a newer load, since: this one is stale.
+                if ws.shelves.load != load || ws.shelves.kind != kind {
+                    return;
+                }
                 // A deleted collection's shelf falls back to Recent.
                 if let ShelfKind::Collection(id) = ws.shelves.kind
                     && !collections.iter().any(|c| c.id == id)
@@ -81,8 +93,60 @@ impl Workspace {
                     ws.shelves.kind,
                     items.as_ref().map_or(0, Vec::len)
                 ));
+                if let Some(items) = &items {
+                    ws.shelves.cache.insert(kind, items.clone());
+                }
+                let paths: Vec<PathBuf> = items
+                    .iter()
+                    .flatten()
+                    .filter(|i| !i.missing)
+                    .map(|i| i.path.clone())
+                    .collect();
                 ws.shelves.items = items;
                 cx.notify();
+                ws.check_shelf_files(kind, load, paths, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// After a shelf shows: look for its files on disk, off the UI thread,
+    /// and mark the ones that have gone.
+    fn check_shelf_files(
+        &mut self,
+        kind: ShelfKind,
+        load: u64,
+        paths: Vec<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let gone = cx
+                .background_spawn(async move { crate::library::missing_paths(&paths) })
+                .await;
+            if gone.is_empty() {
+                return;
+            }
+            let _ = this.update(cx, |ws, cx| {
+                let mark = |items: &mut Vec<RecentItem>| {
+                    for i in items.iter_mut() {
+                        if gone.contains(&i.path) {
+                            i.missing = true;
+                        }
+                    }
+                };
+                if let Some(items) = ws.shelves.cache.get_mut(&kind) {
+                    mark(items);
+                }
+                if ws.shelves.load == load
+                    && ws.shelves.kind == kind
+                    && let Some(items) = ws.shelves.items.as_mut()
+                {
+                    mark(items);
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -127,7 +191,8 @@ impl Workspace {
 
     fn show_shelf(&mut self, kind: ShelfKind, cx: &mut Context<Self>) {
         self.shelves.kind = kind;
-        self.shelves.items = None;
+        // Shown as last seen straight away; the fresh copy follows.
+        self.shelves.items = self.shelves.cache.get(&kind).cloned();
         self.refresh_shelves(cx);
     }
 

@@ -776,7 +776,7 @@ impl Library for StoreLibrary {
             K::Finished => Shelf::Finished,
             K::Collection(id) => Shelf::Collection(kitab_store::CollectionId(id)),
         };
-        let mut items: Vec<RecentItem> = self
+        let items: Vec<RecentItem> = self
             .call(move |s| {
                 let store = s.store.as_ref()?;
                 Some(
@@ -799,11 +799,7 @@ impl Library for StoreLibrary {
             })
             .flatten()
             .unwrap_or_default();
-        // Here, on the caller's thread, not the io thread: a slow or
-        // unplugged drive mustn't hold up documents opening meanwhile.
-        for it in &mut items {
-            it.missing = it.missing || !it.path.exists();
-        }
+        // The files are checked by Home afterwards (kitab_ui::missing_paths).
         items
     }
 

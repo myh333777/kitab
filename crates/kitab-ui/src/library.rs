@@ -52,7 +52,7 @@ pub struct StatsView {
 }
 
 /// A list Home can show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ShelfKind {
     /// Continue reading and Recent (opened documents, newest first).
     #[default]
@@ -187,6 +187,9 @@ pub trait Library: Send + Sync + 'static {
         None
     }
     /// The documents on a shelf (not Recent; that's [`Library::recent`]).
+    /// `missing` is what the library last knew: the files aren't looked at
+    /// here (thousands of them, maybe on a slow drive), so a shelf shows at
+    /// once; [`missing_paths`] checks them after.
     fn shelf(&self, kind: ShelfKind) -> Vec<RecentItem> {
         let _ = kind;
         Vec::new()
@@ -266,5 +269,89 @@ impl Library for NoLibrary {
     fn end_session(&self) {}
     fn last_session(&self) -> Vec<SessionTab> {
         Vec::new()
+    }
+}
+
+/// Which of `paths` aren't there. A drive or share that isn't there at all
+/// (unplugged, offline) is noticed once and its files counted missing
+/// without asking for each; the rest are looked at a few threads at a time,
+/// since one slow drive answers each question slowly.
+pub fn missing_paths(paths: &[PathBuf]) -> std::collections::HashSet<PathBuf> {
+    use std::collections::{HashMap, HashSet};
+    // The drive (C:\, \\server\share\, /) each path is on.
+    let root = |p: &Path| p.ancestors().last().map(Path::to_path_buf);
+    let mut roots: HashMap<PathBuf, bool> = HashMap::new();
+    let mut gone = HashSet::new();
+    let mut ask = Vec::new();
+    for p in paths {
+        let here = match root(p) {
+            Some(r) if !r.as_os_str().is_empty() => {
+                *roots.entry(r.clone()).or_insert_with(|| r.exists())
+            }
+            _ => true,
+        };
+        if here {
+            ask.push(p);
+        } else {
+            gone.insert(p.clone());
+        }
+    }
+    if ask.is_empty() {
+        return gone;
+    }
+    let workers = 8.min(ask.len());
+    let chunk = ask.len().div_ceil(workers);
+    std::thread::scope(|s| {
+        let jobs: Vec<_> = ask
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter()
+                        .filter(|p| !p.exists())
+                        .map(|p| (*p).clone())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for job in jobs {
+            gone.extend(job.join().unwrap_or_default());
+        }
+    });
+    gone
+}
+
+#[cfg(test)]
+mod tests {
+    use super::missing_paths;
+    use std::path::PathBuf;
+
+    #[test]
+    fn missing_files_and_absent_drives_are_found() {
+        let dir = std::env::temp_dir().join(format!("kitab-missing-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let here = dir.join("here.pdf");
+        std::fs::write(&here, b"%PDF").unwrap();
+        let gone = dir.join("gone.pdf");
+        // A drive letter nothing is on (an unplugged drive).
+        #[cfg(windows)]
+        let away = ('D'..='Z')
+            .rev()
+            .map(|c| PathBuf::from(format!(r"{c}:\")))
+            .find(|r| !r.exists())
+            .expect("a free drive letter")
+            .join("book.pdf");
+        #[cfg(not(windows))]
+        let away = PathBuf::from("/kitab-no-such-dir/book.pdf");
+        let mut paths = vec![here.clone(), gone.clone(), away.clone()];
+        // Enough to be spread over several threads.
+        for i in 0..40 {
+            paths.push(dir.join(format!("also-gone-{i}.pdf")));
+        }
+        let missing = missing_paths(&paths);
+        assert!(!missing.contains(&here));
+        assert!(missing.contains(&gone));
+        assert!(missing.contains(&away));
+        assert_eq!(missing.len(), paths.len() - 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code and math use the system's own fonts on macOS and Linux.
 
 ### Fixed
+- Home with a big library: going back to a shelf, or to Home, shows its books at once instead of an empty page while the whole shelf reloads; files are checked after the shelf shows, a drive that isn't plugged in is noticed once instead of file by file, and a slow load that finishes after you've picked another shelf no longer shows its books there.
 - Dialogs (Settings and others) no longer stop half faded in, or open late, until the mouse moves: a repaint asked for while a slow frame was drawing was lost.
 - Tabs no longer vanish when Kitab is started by opening a file (common right after a reinstall): the file joins the tabs you had.
 - A tab on a drive that's unplugged keeps its place instead of being dropped.
