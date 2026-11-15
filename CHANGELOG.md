@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code and math use the system's own fonts on macOS and Linux.
 
 ### Fixed
+- Dialogs (Settings and others) no longer stop half faded in, or open late, until the mouse moves: a repaint asked for while a slow frame was drawing was lost.
 - Tabs no longer vanish when Kitab is started by opening a file (common right after a reinstall): the file joins the tabs you had.
 - A tab on a drive that's unplugged keeps its place instead of being dropped.
 - Closing a tab now frees its document; before, it stayed open (and in memory) until Kitab quit.

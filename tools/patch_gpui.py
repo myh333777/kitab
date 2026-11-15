@@ -503,6 +503,57 @@ struct WindowInvalidatorInner {"""),
                         }
                     }"""),
     ])
+    #    The window is marked painted before its frame is drawn, not after: a
+    #    repaint the vsync thread asks for while a slow frame is drawing (the
+    #    next step of an animation) was wiped out by the late ValidateRect,
+    #    and with the flag already spent nothing drew again until the mouse
+    #    moved: dialogs stuck half faded in.
+    edit("src/platform/windows/events.rs", [
+        ("""        let mut request_frame = self.state.borrow_mut().callbacks.request_frame.take()?;
+        request_frame(RequestFrameOptions {
+            require_presentation: false,
+            force_render,
+        });
+        self.state.borrow_mut().callbacks.request_frame = Some(request_frame);
+        unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+        Some(0)""",
+         """        let mut request_frame = self.state.borrow_mut().callbacks.request_frame.take()?;
+        // Kitab patch: painted first, so a repaint asked for meanwhile stands.
+        unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+        request_frame(RequestFrameOptions {
+            require_presentation: false,
+            force_render,
+        });
+        self.state.borrow_mut().callbacks.request_frame = Some(request_frame);
+        Some(0)"""),
+    ])
+    #    And a frame that ends still wanting another (a notify that came in
+    #    while it drew, an animation's next step) asks for it again.
+    edit("src/window.rs", [
+        ("""            let last_input_timestamp = last_input_timestamp.clone();
+            move |request_frame_options| {""",
+         """            let last_input_timestamp = last_input_timestamp.clone();
+            let kitab_callbacks = next_frame_callbacks.clone();
+            move |request_frame_options| {"""),
+        ("""                handle
+                    .update(&mut cx, |_, window, _| {
+                        window.complete_frame();
+                    })
+                    .log_err();
+            }
+        }));""",
+         """                handle
+                    .update(&mut cx, |_, window, _| {
+                        window.complete_frame();
+                    })
+                    .log_err();
+                // Kitab patch: more to draw already: ask for the next frame.
+                if invalidator.is_dirty() || !kitab_callbacks.borrow().is_empty() {
+                    kitab_want_frame();
+                }
+            }
+        }));"""),
+    ])
     # 10. Interface size (Kitab's Settings › Appearance): every window's scale
     #     is the monitor's times the user's factor, like a browser's zoom, so
     #     text, icons, spacing and pages all grow together. A DPI message with
