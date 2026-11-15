@@ -127,7 +127,8 @@ pub(super) enum Edit {
 
 /// Strokes tessellated once, by a hash of their page-local points, width
 /// and closure; painted each frame moved to where the page is.
-pub(super) type StrokeCache = std::rc::Rc<std::cell::RefCell<std::collections::HashMap<u64, gpui::Path<Pixels>>>>;
+pub(super) type StrokeCache =
+    std::rc::Rc<std::cell::RefCell<std::collections::HashMap<u64, gpui::Path<Pixels>>>>;
 
 /// Strokes kept before the cache starts afresh (marks across many pages
 /// and zoom levels).
@@ -1845,7 +1846,11 @@ fn paint_mark(
             let mut h = std::collections::hash_map::DefaultHasher::new();
             (width.to_bits(), closed, points.len()).hash(&mut h);
             for p in points {
-                (f32::from(p.x - origin.x).to_bits(), f32::from(p.y - origin.y).to_bits()).hash(&mut h);
+                (
+                    f32::from(p.x - origin.x).to_bits(),
+                    f32::from(p.y - origin.y).to_bits(),
+                )
+                    .hash(&mut h);
             }
             h.finish()
         };
@@ -1857,7 +1862,9 @@ fn paint_mark(
             .iter()
             .map(|p| gpui::point(p.x - origin.x, p.y - origin.y))
             .collect();
-        let [first, rest @ ..] = points.as_slice() else { return };
+        let [first, rest @ ..] = points.as_slice() else {
+            return;
+        };
         let options = StrokeOptions::default()
             .with_line_width(width)
             .with_line_cap(LineCap::Round)

@@ -391,7 +391,12 @@ pub(crate) fn pdf_page_size(pdf: &PdfDocument, index: u32) -> Option<SizePt> {
         if !v.iter().all(|x| x.is_finite()) {
             return None;
         }
-        Some([v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3])])
+        Some([
+            v[0].min(v[2]),
+            v[1].min(v[3]),
+            v[0].max(v[2]),
+            v[1].max(v[3]),
+        ])
     };
     let mut media = rect("MediaBox").unwrap_or([0.0, 0.0, 612.0, 792.0]);
     if media[2] - media[0] < 1.0 || media[3] - media[1] < 1.0 {
@@ -861,9 +866,11 @@ mod size_tests {
         // KITAB_SIZE_DIR adds a folder of other PDFs to compare (read only).
         let extra = std::env::var_os("KITAB_SIZE_DIR").map(std::path::PathBuf::from);
         let mut checked = 0;
-        let entries = std::fs::read_dir(&dir)
-            .unwrap()
-            .chain(extra.iter().flat_map(|d| std::fs::read_dir(d).into_iter().flatten()));
+        let entries = std::fs::read_dir(&dir).unwrap().chain(
+            extra
+                .iter()
+                .flat_map(|d| std::fs::read_dir(d).into_iter().flatten()),
+        );
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("pdf") {

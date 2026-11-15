@@ -544,8 +544,11 @@ impl Workspace {
                 // Painted right after the picture, so its texture is on the
                 // GPU by then and the copy in memory can go.
                 let slim = (!image.kitab_is_husk()).then(|| {
-                    let (painted, path, this) =
-                        (self.home.painted.clone(), item.path.clone(), cx.weak_entity());
+                    let (painted, path, this) = (
+                        self.home.painted.clone(),
+                        item.path.clone(),
+                        cx.weak_entity(),
+                    );
                     gpui::canvas(
                         |_, _, _| (),
                         move |_, _, window, cx| {

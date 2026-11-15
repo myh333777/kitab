@@ -186,13 +186,13 @@ impl Reader {
                             fresh.push(key);
                         }
                         out.push(
-                        img(ImageSource::Render(image.clone()))
-                            .absolute()
-                            .left(px(rect.x as f32 / sf))
-                            .top(px(rect.y as f32 / sf))
-                            .w(px(rect.w as f32 / sf))
-                            .h(px(rect.h as f32 / sf))
-                            .into_any_element(),
+                            img(ImageSource::Render(image.clone()))
+                                .absolute()
+                                .left(px(rect.x as f32 / sf))
+                                .top(px(rect.y as f32 / sf))
+                                .w(px(rect.w as f32 / sf))
+                                .h(px(rect.h as f32 / sf))
+                                .into_any_element(),
                         )
                     }
                     None => self.request_tile(key, rect, scale, cx),
