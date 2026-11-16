@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in Kitab doesn't work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The guide at https://kitab.t21.dev/docs may already answer it.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Kitab is it about?
+      options:
+        - Home / Recent
+        - Reading (pages, zoom, scrolling)
+        - Markdown
+        - Search / find
+        - Notes, highlights, pen
+        - Forms, signing, passwords
+        - Read aloud
+        - Menus, tabs, settings
+        - Install / updates
+        - Speed / memory
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Kitab version
+      description: Settings → About shows it.
+      placeholder: "0.6.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What happened, step by step
+      placeholder: |
+        1. Right-click a book on Home
+        2. Switch to another app
+        3. The menu stays open
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshot or file (optional)
+      description: Drag a screenshot in. Only attach a document if it's fine to make it public.

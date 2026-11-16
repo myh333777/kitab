@@ -1,0 +1,38 @@
+name: Feature request
+description: An idea that would make Kitab better.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Kitab is it about?
+      options:
+        - Home / Recent
+        - Reading (pages, zoom, scrolling)
+        - Markdown
+        - Search / find
+        - Notes, highlights, pen
+        - Forms, signing, passwords
+        - Read aloud
+        - Menus, tabs, settings
+        - Install / updates
+        - Speed / memory
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation or annoyance, not the solution yet.
+      placeholder: Files I deleted still show on Home and I remove them one by one.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      placeholder: A button on Home that clears every missing file at once.
+    validations:
+      required: true

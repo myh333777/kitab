@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Kitab guide
+    url: https://kitab.t21.dev/docs
+    about: How things work, shortcuts and answers to common questions.
