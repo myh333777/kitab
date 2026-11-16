@@ -137,6 +137,9 @@ fn main() {
             }
         });
     }
+    app.on_reopen(|cx| {
+        kitab_ui::open_paths(cx, Vec::new());
+    });
     kitab_os::trace::mark("gpui application");
     app.run(move |cx| {
         kitab_os::trace::mark("gpui running");
@@ -167,7 +170,9 @@ fn main() {
 
 /// A `file://` URL (macOS hands opened files over as these) as a path.
 fn path_of_url(url: &str) -> Option<PathBuf> {
-    let rest = url.strip_prefix("file://")?;
+    let rest = url
+        .strip_prefix("file://localhost")
+        .or_else(|| url.strip_prefix("file://"))?;
     // Undo %-escapes ("%20" for a space), byte by byte, then read as UTF-8.
     let bytes = rest.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -206,6 +211,11 @@ mod url_tests {
         assert_eq!(
             path_of_url("file:///Users/me/My%20Books/a.pdf"),
             Some(std::path::PathBuf::from("/Users/me/My Books/a.pdf"))
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            path_of_url("file://localhost/Users/me/notes.md"),
+            Some(std::path::PathBuf::from("/Users/me/notes.md"))
         );
         assert_eq!(path_of_url("https://example.com/a.pdf"), None);
         assert_eq!(path_of_url("file://relative.pdf"), None);

@@ -49,18 +49,39 @@ pub mod layout {
 struct MainWindow(gpui::WindowHandle<shell::Workspace>);
 impl gpui::Global for MainWindow {}
 
+/// Stored by [`open_main_window`] so macOS can recreate the main window when
+/// a file is opened or the Dock icon is clicked after the user closed it.
+struct MainLaunch {
+    engine: Arc<dyn DocEngine>,
+    library: Arc<dyn Library>,
+}
+impl gpui::Global for MainLaunch {}
+
 /// Open `paths` as tabs in the main window and bring it to the front (a
-/// second Kitab handed them over). An empty list only brings it forward.
+/// second Kitab handed them over, or macOS sent open/reopen events).
+/// An empty list brings an existing window forward, or reopens one if closed.
 pub fn open_paths(cx: &mut App, paths: Vec<PathBuf>) {
-    let Some(handle) = cx.try_global::<MainWindow>().map(|w| w.0) else {
+    if let Some(handle) = cx.try_global::<MainWindow>().map(|w| w.0) {
+        let updated = handle.update(cx, |ws, window, cx| {
+            for p in &paths {
+                ws.open_tab(p.clone(), window, cx);
+            }
+            window.activate_window();
+        });
+        if updated.is_ok() {
+            cx.activate(true);
+            return;
+        }
+    }
+    let Some(launch) = cx.try_global::<MainLaunch>() else {
         return;
     };
-    let _ = handle.update(cx, |ws, window, cx| {
-        for p in paths {
-            ws.open_tab(p, window, cx);
-        }
-        window.activate_window();
-    });
+    let engine = launch.engine.clone();
+    let library = launch.library.clone();
+    let place = Style::get(cx).window;
+    if create_main_window(cx, engine, library, place, paths) {
+        cx.activate(true);
+    }
 }
 
 pub struct FirstPaint(pub Option<Box<dyn FnOnce()>>);
@@ -204,23 +225,34 @@ pub fn open_main_window(
     gpui::kitab_set_ui_scale(f32::from(settings.ui_scale) / 100.0);
     cx.set_global(Style::from_settings(theme, &settings));
     cx.set_global(shell::SettingsSink(save_settings));
+    cx.set_global(MainLaunch {
+        engine: engine.clone(),
+        library: library.clone(),
+    });
     actions::bind_default_keys(cx);
     shell::init_native_menu(cx);
+    create_main_window(cx, engine, library, settings.window, files)
+}
+
+fn create_main_window(
+    cx: &mut App,
+    engine: Arc<dyn DocEngine>,
+    library: Arc<dyn Library>,
+    place: Option<settings::WindowPlace>,
+    files: Vec<PathBuf>,
+) -> bool {
     // Where the window was when Kitab last closed, if that place is still on
     // a screen; otherwise the default size, centred.
-    let (bounds, display_id) = settings
-        .window
-        .and_then(|p| saved_bounds(p, cx))
-        .unwrap_or_else(|| {
-            (
-                WindowBounds::Windowed(Bounds::centered(
-                    None,
-                    size(px(layout::WINDOW_W), px(layout::WINDOW_H)),
-                    cx,
-                )),
+    let (bounds, display_id) = place.and_then(|p| saved_bounds(p, cx)).unwrap_or_else(|| {
+        (
+            WindowBounds::Windowed(Bounds::centered(
                 None,
-            )
-        });
+                size(px(layout::WINDOW_W), px(layout::WINDOW_H)),
+                cx,
+            )),
+            None,
+        )
+    });
     let options = WindowOptions {
         window_bounds: Some(bounds),
         display_id,
@@ -234,16 +266,14 @@ pub fn open_main_window(
         // Small enough for half a laptop screen; below it the title bar,
         // Home's header and Settings can't fit their controls.
         window_min_size: Some(gpui::size(px(640.0), px(460.0))),
-        // Shown below, cloaked; `reveal` uncloaks it once the first page is
-        // drawn (or after REVEAL_AT_LATEST), so it never appears empty.
-        show: false,
+        // Windows opens cloaked so `reveal` uncloaks once the first page is
+        // drawn; macOS and Linux show right away.
+        show: !cfg!(target_os = "windows"),
         ..Default::default()
     };
     cx.set_global(Unrevealed(true));
     cx.set_global(PendingPlace(
-        settings
-            .window
-            .and_then(|p| p.raw.map(|r| (r, p.maximized))),
+        place.and_then(|p| p.raw.map(|r| (r, p.maximized))),
     ));
     match cx.open_window(options, |window, cx| {
         cx.new(|cx| shell::Workspace::new(engine, library, files, window, cx))

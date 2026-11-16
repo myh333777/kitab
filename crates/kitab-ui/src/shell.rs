@@ -594,7 +594,9 @@ impl Workspace {
                     this.update(cx, |ws, cx| {
                         ws.restoring = false;
                         if let Some(p) = plan.get(first) {
-                            ws.open_tab(p.clone(), window, cx);
+                            // If a file arrived via open_urls during start-up, keep it active.
+                            let show = ws.active.is_none();
+                            ws.insert_tab(p.clone(), None, show, window, cx);
                         }
                         cx.notify();
                     })

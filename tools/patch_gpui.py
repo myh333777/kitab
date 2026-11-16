@@ -668,6 +668,7 @@ struct WindowInvalidatorInner {"""),
     path_patch()
     touch_patch()
     menu_key_patch()
+    mac_activate_patch()
     print(f"patched gpui copy: {DEST}")
 
 
@@ -886,6 +887,39 @@ def menu_key_patch() -> None:
                                 || keystrokes[0].modifiers().platform)
                         {
 """),
+    ])
+
+
+def mac_activate_patch() -> None:
+    """16. MacActivate: deminiaturize a minimised window when activating it."""
+    edit("src/platform/mac/window.rs", [
+        ("""    fn activate(&self) {
+        let window = self.0.lock().native_window;
+        let executor = self.0.lock().executor.clone();
+        executor
+            .spawn(async move {
+                unsafe {
+                    let _: () = msg_send![window, makeKeyAndOrderFront: nil];
+                }
+            })
+            .detach();
+    }""",
+         """    fn activate(&self) {
+        let window = self.0.lock().native_window;
+        let executor = self.0.lock().executor.clone();
+        executor
+            .spawn(async move {
+                unsafe {
+                    // Kitab patch: restore a minimised window before ordering it forward.
+                    let minimized: BOOL = msg_send![window, isMiniaturized];
+                    if minimized == YES {
+                        let _: () = msg_send![window, deminiaturize: nil];
+                    }
+                    let _: () = msg_send![window, makeKeyAndOrderFront: nil];
+                }
+            })
+            .detach();
+    }"""),
     ])
 
 

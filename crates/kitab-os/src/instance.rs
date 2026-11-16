@@ -4,9 +4,9 @@
 //! listens on a per-user channel; a later one (a double-clicked file, say)
 //! hands its file paths over and exits, and the first opens them as tabs.
 //!
-//! Windows: a named pipe, inbound only, local clients only. Linux: a Unix
-//! socket in the runtime folder. macOS needs neither: the system sends file
-//! opens to the running app (GPUI's open-URLs callback).
+//! Windows: a named pipe, inbound only, local clients only. Unix (Linux and
+//! macOS CLI invocations): a per-user Unix socket. On macOS Finder also sends
+//! file opens directly to the running app (GPUI's open-URLs callback).
 //!
 //! The message is text: `KITAB1`, then one absolute path per line. A message
 //! over 64 KiB, or one that isn't that shape, is ignored. Paths are only
@@ -26,8 +26,6 @@ pub enum Claim {
     Forwarded,
 }
 
-// macOS hands opens to the running app itself, without a message.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn message(files: &[PathBuf]) -> Vec<u8> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let mut text = String::from(MAGIC);
@@ -66,7 +64,6 @@ pub fn parse(bytes: &[u8]) -> Option<Vec<PathBuf>> {
     )
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn user_key() -> String {
     let user = std::env::var("USERNAME")
         .or_else(|_| std::env::var("USER"))
@@ -258,7 +255,7 @@ mod imp {
     }
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(unix)]
 mod imp {
     use super::{Claim, Listener, MAX_MESSAGE, message, parse, user_key};
     use std::io::{Read, Write};
@@ -278,7 +275,12 @@ mod imp {
         if let Some(id) = std::env::var_os("FLATPAK_ID") {
             dir = dir.join("app").join(id);
         }
-        dir.join(format!("kitab-{}.sock", user_key()))
+        let sock = dir.join(format!("kitab-{}.sock", user_key()));
+        // macOS limits sockaddr_un.sun_path to 104 bytes.
+        if cfg!(target_os = "macos") && sock.to_string_lossy().len() >= 100 {
+            return PathBuf::from(format!("/tmp/kitab-{}.sock", user_key()));
+        }
+        sock
     }
 
     fn send(path: &PathBuf, bytes: &[u8]) -> bool {
@@ -319,21 +321,6 @@ mod imp {
             }
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-mod imp {
-    use super::{Claim, Listener};
-    use std::path::PathBuf;
-
-    pub struct Inner;
-
-    /// macOS routes file opens to the running app itself.
-    pub fn claim(_files: &[PathBuf]) -> Claim {
-        Claim::Primary(Listener { inner: Inner })
-    }
-
-    pub fn serve(_inner: Inner, _on_paths: &dyn Fn(Vec<PathBuf>)) {}
 }
 
 #[cfg(test)]
