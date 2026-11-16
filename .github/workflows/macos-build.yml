@@ -11,9 +11,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-macos:
-    name: Build macOS (aarch64)
-    runs-on: macos-latest
+  build-arm64-native:
+    name: Build macOS arm64 (macos-14)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,7 +28,7 @@ jobs:
         run: python3 tools/patch_gpui.py
       - uses: swatinem/rust-cache@v2
         with:
-          key: macos-release
+          key: macos-native-arm64
       - name: Format check
         run: cargo fmt --all --check
       - name: Clippy
@@ -40,11 +40,55 @@ jobs:
       - name: Package DMG
         run: |
           python3 tools/package.py 0.6.2
+          file dist/Kitab.app/Contents/MacOS/kitab
           shasum -a 256 dist/Kitab_0.6.2_aarch64.dmg | tee dist/Kitab_0.6.2_aarch64.dmg.sha256
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kitab-macos-aarch64
+          name: kitab-macos-aarch64-native
+          path: |
+            dist/Kitab_0.6.2_aarch64.dmg
+            dist/Kitab_0.6.2_aarch64.dmg.sha256
+
+  build-arm64-cross:
+    name: Build macOS arm64 (macos-15-intel cross)
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: aarch64-apple-darwin
+      - name: Source checks
+        run: python3 tools/check_source.py
+      - name: Patched gpui
+        run: python3 tools/patch_gpui.py
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: macos-cross-arm64
+      - name: Format check
+        run: cargo fmt --all --check
+      - name: Clippy (arm64 target)
+        run: cargo clippy --workspace --all-targets --target aarch64-apple-darwin -- -D warnings
+      - name: Build release (arm64 target)
+        run: |
+          cargo build --release --target aarch64-apple-darwin -p kitab
+          mkdir -p target/release
+          cp target/aarch64-apple-darwin/release/kitab target/release/kitab
+          file target/release/kitab
+      - name: Package DMG
+        run: |
+          python3 tools/package.py 0.6.2
+          mv dist/Kitab_0.6.2_x86_64.dmg dist/Kitab_0.6.2_aarch64.dmg
+          file dist/Kitab.app/Contents/MacOS/kitab
+          shasum -a 256 dist/Kitab_0.6.2_aarch64.dmg | tee dist/Kitab_0.6.2_aarch64.dmg.sha256
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kitab-macos-aarch64-cross
           path: |
             dist/Kitab_0.6.2_aarch64.dmg
             dist/Kitab_0.6.2_aarch64.dmg.sha256
