@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-16
+
+### Added
+- Help has a Guide (kitab.t21.dev/docs), Kitab on GitHub and Report an issue; the Guide is also in the ⋯ menu, the command palette and Settings › About.
+- Home can remove every missing file on a shelf at once ("Remove N missing files"). Books on a drive or share that isn't connected are kept.
+
+### Fixed
+- An open menu closes when you switch to another app instead of staying over it.
+- Recent shows books whose file was deleted as missing, like the other shelves.
+
 ## [0.6.1] - 2026-11-15
 
 ### Changed
@@ -390,7 +400,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fit width and fit page follow a window resize even when no new page has to be drawn.
 - The Settings window shrinks to fit small windows instead of running off the left edge.
 
-[Unreleased]: https://github.com/t21dev/kitab/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/t21dev/kitab/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/t21dev/kitab/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/t21dev/kitab/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/t21dev/kitab/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/t21dev/kitab/compare/v0.4.2...v0.5.0
