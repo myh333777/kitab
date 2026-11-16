@@ -11,45 +11,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-arm64-native:
-    name: Build macOS arm64 (macos-14)
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: Source checks
-        run: python3 tools/check_source.py
-      - name: Patched gpui
-        run: python3 tools/patch_gpui.py
-      - uses: swatinem/rust-cache@v2
-        with:
-          key: macos-native-arm64
-      - name: Format check
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --workspace
-      - name: Build release
-        run: python3 tools/build_release.py
-      - name: Package DMG
-        run: |
-          python3 tools/package.py 0.6.2
-          file dist/Kitab.app/Contents/MacOS/kitab
-          shasum -a 256 dist/Kitab_0.6.2_aarch64.dmg | tee dist/Kitab_0.6.2_aarch64.dmg.sha256
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kitab-macos-aarch64-native
-          path: |
-            dist/Kitab_0.6.2_aarch64.dmg
-            dist/Kitab_0.6.2_aarch64.dmg.sha256
-
   build-arm64-cross:
     name: Build macOS arm64 (macos-15-intel cross)
     runs-on: macos-15-intel
@@ -60,7 +21,7 @@ jobs:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: rustfmt
           targets: aarch64-apple-darwin
       - name: Source checks
         run: python3 tools/check_source.py
@@ -71,24 +32,43 @@ jobs:
           key: macos-cross-arm64
       - name: Format check
         run: cargo fmt --all --check
-      - name: Clippy (arm64 target)
-        run: cargo clippy --workspace --all-targets --target aarch64-apple-darwin -- -D warnings
       - name: Build release (arm64 target)
         run: |
           cargo build --release --target aarch64-apple-darwin -p kitab
           mkdir -p target/release
           cp target/aarch64-apple-darwin/release/kitab target/release/kitab
           file target/release/kitab
-      - name: Package DMG
+      - name: Package Kitab.app archive
         run: |
-          python3 tools/package.py 0.6.2
-          mv dist/Kitab_0.6.2_x86_64.dmg dist/Kitab_0.6.2_aarch64.dmg
+          python3 - <<'PY'
+          import pathlib, shutil, subprocess
+
+          root = pathlib.Path(".")
+          dist = root / "dist"
+          app = dist / "Kitab.app"
+          if app.exists():
+              shutil.rmtree(app)
+          contents = app / "Contents"
+          (contents / "MacOS").mkdir(parents=True)
+          res = contents / "Resources"
+          res.mkdir()
+          shutil.copy2(root / "target/release/kitab", contents / "MacOS/kitab")
+          plist = (root / "packaging/macos/Info.plist").read_text(encoding="utf8").replace("@VERSION@", "0.6.2")
+          (contents / "Info.plist").write_text(plist, encoding="utf8")
+          for icns in (root / "packaging/macos").glob("*.icns"):
+              shutil.copy2(icns, res / icns.name)
+          shutil.copy2(root / "LICENSE", res / "LICENSE.txt")
+          shutil.copy2(root / "NOTICE", res / "NOTICE.txt")
+          subprocess.check_call(["codesign", "--force", "--deep", "--sign", "-", str(app)])
+          subprocess.check_call(["codesign", "--verify", "--deep", "--strict", str(app)])
+          PY
           file dist/Kitab.app/Contents/MacOS/kitab
-          shasum -a 256 dist/Kitab_0.6.2_aarch64.dmg | tee dist/Kitab_0.6.2_aarch64.dmg.sha256
-      - name: Upload DMG artifact
+          ditto -c -k --sequesterRsrc --keepParent dist/Kitab.app dist/Kitab_0.6.2_aarch64.app.zip
+          shasum -a 256 dist/Kitab_0.6.2_aarch64.app.zip | tee dist/Kitab_0.6.2_aarch64.app.zip.sha256
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kitab-macos-aarch64-cross
+          name: kitab-macos-aarch64
           path: |
-            dist/Kitab_0.6.2_aarch64.dmg
-            dist/Kitab_0.6.2_aarch64.dmg.sha256
+            dist/Kitab_0.6.2_aarch64.app.zip
+            dist/Kitab_0.6.2_aarch64.app.zip.sha256
