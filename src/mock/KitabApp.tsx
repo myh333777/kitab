@@ -334,7 +334,15 @@ function Reader({
   const re = findOpen ? findRegex(query, matchCase, wholeWord) : null;
   const total = countHits(strings, re);
   const curHit = total ? ((hit % total) + total) % total : -1;
+  // Focus only when someone opens find. A scene that starts with find open
+  // must not focus on load: iOS Safari ignores preventScroll and scrolls the
+  // page down to the input.
+  const findOpenedOnLoad = useRef(findOpen);
   useEffect(() => {
+    if (findOpenedOnLoad.current) {
+      findOpenedOnLoad.current = false;
+      return;
+    }
     if (findOpen) findInput.current?.focus({ preventScroll: true });
   }, [findOpen]);
   useEffect(() => {
