@@ -183,9 +183,12 @@ const MENUS: &[BarMenu] = &[
         title: "Help",
         key: "h",
         rows: &[
+            row!("Guide", "", Nothing, OpenGuide),
             row!("Keyboard shortcuts", "Ctrl+/", Nothing, ShowShortcuts),
             row!("Edit keymap.json", "", Nothing, OpenKeymap),
             None,
+            row!("Kitab on GitHub", "", Nothing, OpenRepo),
+            row!("Report an issue…", "", Nothing, ReportIssue),
             row!("Check for updates", "", Nothing, CheckForUpdates),
         ],
     },

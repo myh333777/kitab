@@ -260,6 +260,27 @@ pub const COMMANDS: &[Command] = &[
         false,
         CheckForUpdates
     ),
+    cmd!(
+        "Kitab",
+        "Guide",
+        "help docs documentation manual how",
+        false,
+        OpenGuide
+    ),
+    cmd!(
+        "Kitab",
+        "Kitab on GitHub",
+        "source code repository",
+        false,
+        OpenRepo
+    ),
+    cmd!(
+        "Kitab",
+        "Report an issue",
+        "bug problem feedback feature request",
+        false,
+        ReportIssue
+    ),
 ];
 
 /// How well `query` matches `text`: `None` when some query letter is

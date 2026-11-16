@@ -33,6 +33,10 @@ pub fn managed_hint(by: &str) -> &'static str {
 
 /// The project on GitHub.
 pub const REPO: &str = "https://github.com/t21dev/kitab";
+/// The user guide on the website.
+pub const DOCS: &str = "https://kitab.t21.dev/docs";
+/// Where a new issue starts: GitHub offers the bug and feature forms.
+pub const NEW_ISSUE: &str = "https://github.com/t21dev/kitab/issues/new/choose";
 /// The latest release's page, where Download goes.
 pub const RELEASES_PAGE: &str = "https://github.com/t21dev/kitab/releases/latest";
 /// The API answer for the latest published release (drafts and pre-releases

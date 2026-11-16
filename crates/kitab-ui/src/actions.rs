@@ -90,6 +90,9 @@ actions!(
         CommandPalette,
         CheckForUpdates,
         OpenKeymap,
+        OpenGuide,
+        OpenRepo,
+        ReportIssue,
         // Presentation mode
         Present,
         // Printing

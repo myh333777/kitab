@@ -797,9 +797,10 @@ pub(super) fn about(ws: &WeakEntity<Workspace>, info: &SystemInfo, st: &Style) -
             "Links",
             None,
             rows(vec![
+                link("about-guide", "book", "Guide", "kitab.t21.dev/docs", kitab_os::update::DOCS.to_string()),
                 link("about-repo", "code", "Source code", "github.com/t21dev/kitab", REPO.to_string()),
                 link("about-changes", "history", "What's new", "The changelog for every version.", format!("{REPO}/blob/main/CHANGELOG.md")),
-                link("about-issue", "issue", "Report a problem", "Opens a new issue on GitHub.", format!("{REPO}/issues/new")),
+                link("about-issue", "issue", "Report a problem", "Opens a new issue on GitHub.", kitab_os::update::NEW_ISSUE.to_string()),
                 link("about-privacy", "shield", "Privacy policy", "No telemetry; your files stay on your computer.", format!("{REPO}/blob/main/PRIVACY.md")),
                 link("about-licence", "scale", "Licence", "GNU Affero General Public License 3.0 or later.", format!("{REPO}/blob/main/LICENSE")),
                 link("about-notice", "file", "Third-party notices", "MuPDF, GPUI, fonts and the other parts Kitab is built from.", format!("{REPO}/blob/main/NOTICE")),
