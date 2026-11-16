@@ -390,6 +390,8 @@ impl Workspace {
                     ws.load_system_info(section, cx);
                 }
             } else {
+                // A menu left open over another app looks stuck (#6).
+                ws.close_menu(window, cx);
                 ws.release_when_idle(cx);
             }
         });
@@ -651,8 +653,25 @@ impl Workspace {
         let library = self.library.clone();
         cx.spawn(async move |this, cx| {
             let recent = cx.background_spawn(async move { library.recent(24) }).await;
+            let paths: Vec<PathBuf> = recent.iter().map(|i| i.path.clone()).collect();
             let _ = this.update(cx, |ws, cx| {
                 ws.recent = recent;
+                cx.notify();
+            });
+            // Then look for the files on disk, as the other shelves do, so a
+            // deleted book shows as missing on Recent too.
+            let gone = cx
+                .background_spawn(async move { crate::library::missing_paths(&paths) })
+                .await;
+            if gone.is_empty() {
+                return;
+            }
+            let _ = this.update(cx, |ws, cx| {
+                for i in ws.recent.iter_mut() {
+                    if gone.contains(&i.path) {
+                        i.missing = true;
+                    }
+                }
                 cx.notify();
             });
         })
@@ -3513,6 +3532,11 @@ impl Render for Workspace {
                 ws.open_settings(window, cx);
                 ws.check_for_updates(true, cx);
             }))
+            .on_action(cx.listener(|_, _: &OpenGuide, _, cx| cx.open_url(kitab_os::update::DOCS)))
+            .on_action(cx.listener(|_, _: &OpenRepo, _, cx| cx.open_url(kitab_os::update::REPO)))
+            .on_action(
+                cx.listener(|_, _: &ReportIssue, _, cx| cx.open_url(kitab_os::update::NEW_ISSUE)),
+            )
             .on_action(cx.listener(|ws, _: &ToggleMinimal, _, cx| ws.toggle_minimal(cx)))
             .on_drop(cx.listener(|ws, paths: &ExternalPaths, window, cx| {
                 for p in paths.paths() {
@@ -4349,6 +4373,11 @@ impl Workspace {
             )
             .icon("keyboard")
             .key("Ctrl+/"),
+            MenuItem::new(
+                "Guide",
+                self.on_ws(cx, |_, _, cx| cx.open_url(kitab_os::update::DOCS)),
+            )
+            .icon("book"),
             MenuItem::new(
                 "Settings…",
                 self.on_ws(cx, |ws, window, cx| ws.open_settings(window, cx)),

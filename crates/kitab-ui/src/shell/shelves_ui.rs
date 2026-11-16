@@ -285,7 +285,116 @@ impl Workspace {
                 )
                 .child("+ Collection"),
         );
+        let missing = self.shown_missing().len();
+        if missing > 0 {
+            row = row.child(
+                div()
+                    .id("shelf-clear-missing")
+                    .ml_auto()
+                    .h(px(28.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .rounded_full()
+                    .text_size(px(12.5))
+                    .text_color(st.c(|c| c.faint))
+                    .cursor_pointer()
+                    .hover(|d| d.bg(st.hover_bg()).text_color(st.c(|c| c.text)))
+                    .on_click(cx.listener(|ws, _, window, cx| ws.clear_missing(window, cx)))
+                    .child(if missing == 1 {
+                        "Remove 1 missing file".to_string()
+                    } else {
+                        format!("Remove {missing} missing files")
+                    }),
+            );
+        }
         row.into_any_element()
+    }
+
+    /// The books on the shelf Home shows whose files couldn't be found.
+    fn shown_missing(&self) -> Vec<PathBuf> {
+        let items = match self.shelves.kind {
+            ShelfKind::Recent => Some(&self.recent),
+            _ => self.shelves.items.as_ref(),
+        };
+        items
+            .into_iter()
+            .flatten()
+            .filter(|i| i.missing)
+            .map(|i| i.path.clone())
+            .collect()
+    }
+
+    /// Take the shown books whose files are gone off Home (#4), after
+    /// asking once. Files whose folder can't be seen right now (an
+    /// unplugged drive, an offline share) stay: they may come back.
+    fn clear_missing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = self.shown_missing();
+        if paths.is_empty() {
+            return;
+        }
+        let handle = window.window_handle();
+        let library = self.library.clone();
+        cx.spawn(async move |this, cx| {
+            let gone = cx
+                .background_spawn(async move { crate::library::gone_for_good(&paths) })
+                .await;
+            if gone.is_empty() {
+                let _ = this.update(cx, |ws, cx| {
+                    ws.toast(
+                        "The missing files' folders can't be seen right now (a drive or share that isn't connected?), so Kitab keeps them.",
+                        false,
+                        None,
+                        cx,
+                    );
+                });
+                return;
+            }
+            let n = gone.len();
+            let Ok(answer) = handle.update(cx, |_, window, cx| {
+                window.prompt(
+                    gpui::PromptLevel::Warning,
+                    &if n == 1 {
+                        "Remove 1 missing file from Home?".to_string()
+                    } else {
+                        format!("Remove {n} missing files from Home?")
+                    },
+                    Some(if n == 1 {
+                        "Kitab forgets its reading place, bookmarks and notes. Files on a drive that isn't connected are kept."
+                    } else {
+                        "Kitab forgets their reading places, bookmarks and notes. Files on a drive that isn't connected are kept."
+                    }),
+                    &["Remove", "Cancel"],
+                    cx,
+                )
+            }) else {
+                return;
+            };
+            if answer.await.ok() != Some(0) {
+                return;
+            }
+            let removed = cx
+                .background_spawn(async move {
+                    gone.iter().filter(|p| library.forget(p)).count()
+                })
+                .await;
+            let _ = this.update(cx, |ws, cx| {
+                if removed > 0 {
+                    ws.toast(
+                        if removed == 1 {
+                            "Removed 1 missing file from Home.".to_string()
+                        } else {
+                            format!("Removed {removed} missing files from Home.")
+                        },
+                        false,
+                        None,
+                        cx,
+                    );
+                }
+                ws.refresh_recent(cx);
+            });
+        })
+        .detach();
     }
 
     /// A shelf other than Recent, as a grid of cards.

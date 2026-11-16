@@ -320,9 +320,33 @@ pub fn missing_paths(paths: &[PathBuf]) -> std::collections::HashSet<PathBuf> {
     gone
 }
 
+/// Which of `paths` are gone for good: the folder is there and the file
+/// isn't. A file whose folder can't be seen (an unplugged drive, an offline
+/// share, a folder moved away) is left out, since it may come back.
+pub fn gone_for_good(paths: &[PathBuf]) -> Vec<PathBuf> {
+    paths
+        .iter()
+        .filter(|p| !p.exists() && p.parent().is_some_and(Path::is_dir))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::missing_paths;
+    use super::{gone_for_good, missing_paths};
+
+    #[test]
+    fn only_files_in_folders_that_are_there_are_gone_for_good() {
+        let dir = std::env::temp_dir().join(format!("kitab-gone-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let here = dir.join("here.pdf");
+        std::fs::write(&here, b"%PDF").unwrap();
+        let gone = dir.join("gone.pdf");
+        let away = dir.join("no-such-folder").join("book.pdf");
+        let found = gone_for_good(&[here, gone.clone(), away]);
+        assert_eq!(found, vec![gone]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use std::path::PathBuf;
 
     #[test]
